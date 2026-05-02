@@ -6,6 +6,7 @@ import {
   HomeOutline,
   LinkOutline,
   SearchOutline,
+  PersonCircleOutline,
   SettingsOutline,
 } from '@vicons/ionicons5'
 import type { MenuOption } from 'naive-ui'
@@ -22,6 +23,7 @@ const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: 'dashboard', icon: renderIcon(HomeOutline) },
   { label: '分享链接', key: 'links', icon: renderIcon(LinkOutline) },
   { label: '搜索', key: 'search', icon: renderIcon(SearchOutline) },
+  { label: '账号管理', key: 'account', icon: renderIcon(PersonCircleOutline) },
   { label: '设置', key: 'settings', icon: renderIcon(SettingsOutline) },
 ]
 

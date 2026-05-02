@@ -8,6 +8,9 @@ import type {
   AppStats,
   PaginatedResult,
   FileEntry,
+  LoginStatus,
+  QrCodeResponse,
+  PollResponse,
 } from '../types'
 
 export async function addShareLink(request: AddShareLinkRequest): Promise<ShareLink> {
@@ -50,4 +53,25 @@ export async function listFiles(params: {
   page_size?: number
 }): Promise<PaginatedResult<FileEntry>> {
   return invoke<PaginatedResult<FileEntry>>('list_files', { params })
+}
+
+// Auth
+export async function initQrcodeLogin(): Promise<QrCodeResponse> {
+  return invoke<QrCodeResponse>('init_qrcode_login')
+}
+
+export async function pollQrcodeLogin(uid: string): Promise<PollResponse> {
+  return invoke<PollResponse>('poll_qrcode_login', { uid })
+}
+
+export async function loginByCookie(cookie: string): Promise<LoginStatus> {
+  return invoke<LoginStatus>('login_by_cookie', { request: { cookie } })
+}
+
+export async function getLoginStatus(): Promise<LoginStatus> {
+  return invoke<LoginStatus>('get_login_status')
+}
+
+export async function logout(): Promise<void> {
+  return invoke('logout')
 }

@@ -27,6 +27,11 @@ pub fn run() {
             commands::search::search_files,
             commands::search::get_file_stats,
             commands::search::list_files,
+            commands::auth::init_qrcode_login,
+            commands::auth::poll_qrcode_login,
+            commands::auth::login_by_cookie,
+            commands::auth::get_login_status,
+            commands::auth::logout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

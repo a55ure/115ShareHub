@@ -75,3 +75,21 @@ export interface ShareLinkDetail {
   files_by_type: Record<string, number>
   top_level_dirs: string[]
 }
+
+export interface LoginStatus {
+  logged_in: boolean
+  user_name: string
+  user_id: string
+  face: string
+  login_time: string | null
+}
+
+export interface QrCodeResponse {
+  uid: string
+  qr_image_base64: string
+}
+
+export interface PollResponse {
+  status: number
+  logged_in: boolean
+}
