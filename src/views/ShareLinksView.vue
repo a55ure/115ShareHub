@@ -156,7 +156,7 @@ const columns: DataTableColumns<ShareLink> = [
     <NModal v-model:show="showModal" preset="dialog" title="添加115分享链接" positive-text="添加" negative-text="取消"
       :loading="submitting" @positive-click="handleAdd">
       <NAlert type="warning" :bordered="false" style="margin-bottom: 12px;">
-        为避免被115服务器封控，解析请求限速为2次/秒。包含大量文件或子目录的分享链接可能需要较长时间，请耐心等待。
+        为避免被115服务器封控，解析请求采用随机间隔（0.5~1.5秒/次）。包含大量文件或子目录的分享链接可能需要较长时间，请耐心等待。
       </NAlert>
       <NForm>
         <NFormItem label="分享链接">

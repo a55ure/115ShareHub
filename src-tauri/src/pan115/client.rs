@@ -1,4 +1,5 @@
 use super::types::ShareSnapResponse;
+use rand::Rng;
 use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,18 +16,18 @@ pub enum ApiError {
     Parse(String),
 }
 
-/// Rate-limited 115 API client.
-/// Uses a mutex + timestamp to enforce a minimum interval between requests,
-/// ensuring they are truly spaced out rather than bursting.
+/// Rate-limited 115 API client with randomized intervals.
+/// Each request waits a random delay (500ms–1500ms) since the last request,
+/// making the pattern look more human and less likely to trigger WAF.
 pub struct Pan115Client {
     http: Client,
     last_request: Arc<Mutex<std::time::Instant>>,
-    min_interval: Duration,
+    min_interval_ms: u64,
+    max_interval_ms: u64,
 }
 
 impl Pan115Client {
-    pub fn new(requests_per_second: u32) -> Self {
-        let interval = Duration::from_millis(1000 / requests_per_second.max(1) as u64);
+    pub fn new(_requests_per_second: u32) -> Self {
         let http = Client::builder()
             .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .timeout(Duration::from_secs(30))
@@ -35,7 +36,8 @@ impl Pan115Client {
         Pan115Client {
             http,
             last_request: Arc::new(Mutex::new(std::time::Instant::now())),
-            min_interval: interval,
+            min_interval_ms: 500,
+            max_interval_ms: 1500,
         }
     }
 
@@ -49,9 +51,11 @@ impl Pan115Client {
     ) -> Result<ShareSnapResponse, ApiError> {
         {
             let mut last = self.last_request.lock().await;
+            let delay_ms = rand::thread_rng().gen_range(self.min_interval_ms..=self.max_interval_ms);
+            let delay = Duration::from_millis(delay_ms);
             let elapsed = last.elapsed();
-            if elapsed < self.min_interval {
-                tokio::time::sleep(self.min_interval - elapsed).await;
+            if elapsed < delay {
+                tokio::time::sleep(delay - elapsed).await;
             }
             *last = std::time::Instant::now();
         }
@@ -84,7 +88,7 @@ impl Pan115Client {
             let preview = &text[..text.len().min(100)];
             if preview.trim().starts_with('<') {
                 log::warn!("115 returned HTML (WAF block), status: {}", status);
-                return Err(ApiError::Api(format!("被115服务器拦截 (HTTP {}), 请稍后再试或降低并发", status)));
+                return Err(ApiError::Api(format!("被115服务器拦截 (HTTP {}), 请稍后再试", status)));
             }
             return Err(ApiError::Api(format!("HTTP {}: {}", status, &text[..text.len().min(200)])));
         }
