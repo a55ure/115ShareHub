@@ -168,9 +168,19 @@ impl Database {
 
         if use_fts {
             if let Some(ref q) = params.query {
-                where_clauses.push(format!("f.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?{})", param_idx));
-                param_values.push(Box::new(q.clone()));
-                param_idx += 1;
+                // Hybrid: FTS5 prefix match + LIKE substring fallback.
+                // FTS5 with "keyword"* handles prefix/whole-word matching;
+                // LIKE '%keyword%' catches substrings that tokenization misses.
+                let fts_query = format!("\"{}\"*", q.replace('\"', ""));
+                let like_pattern = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+
+                where_clauses.push(format!(
+                    "(f.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?{0}) OR f.name LIKE ?{1} ESCAPE '\\')",
+                    param_idx, param_idx + 1
+                ));
+                param_values.push(Box::new(fts_query));
+                param_values.push(Box::new(like_pattern));
+                param_idx += 2;
             }
         }
 

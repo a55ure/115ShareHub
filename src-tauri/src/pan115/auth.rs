@@ -1,4 +1,4 @@
-use super::client::ApiError;
+use super::client::{ApiError, ProxyConfig};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -36,11 +36,30 @@ pub struct AuthClient {
 
 impl AuthClient {
     pub fn new() -> Self {
-        let http = Client::builder()
+        Self::with_proxy(&ProxyConfig::default())
+    }
+
+    pub fn with_proxy(proxy_config: &ProxyConfig) -> Self {
+        let mut builder = Client::builder()
             .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("failed to build HTTP client");
+            .timeout(Duration::from_secs(30));
+
+        if proxy_config.enabled && !proxy_config.host.is_empty() {
+            let proxy_url = format!(
+                "{}://{}:{}",
+                proxy_config.proxy_type, proxy_config.host, proxy_config.port
+            );
+            if let Ok(mut proxy) = reqwest::Proxy::all(&proxy_url) {
+                if let (Some(u), Some(p)) = (&proxy_config.username, &proxy_config.password) {
+                    if !u.is_empty() {
+                        proxy = proxy.basic_auth(u, p);
+                    }
+                }
+                builder = builder.proxy(proxy);
+            }
+        }
+
+        let http = builder.build().expect("failed to build HTTP client");
         AuthClient { http }
     }
 
@@ -165,18 +184,30 @@ impl AuthClient {
             .http
             .get("https://webapi.115.com/user/info")
             .header("Cookie", cookie)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Referer", "https://115.com/")
             .send()
             .await?;
 
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("validate_cookie HTTP {}: {} bytes", status, text.len());
 
         if !status.is_success() {
             return Err(ApiError::Api(format!("Cookie验证失败: HTTP {}", status)));
         }
 
+        if text.trim().is_empty() {
+            return Err(ApiError::Api("Cookie验证失败: 服务器返回空响应".to_string()));
+        }
+
+        if text.trim().starts_with('<') {
+            log::warn!("validate_cookie: got HTML instead of JSON (WAF block)");
+            return Err(ApiError::Api("Cookie验证被115拦截, 请检查代理设置或稍后再试".to_string()));
+        }
+
         let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("{}", e)))?;
+            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
 
         if json.get("state").and_then(|v| v.as_bool()).unwrap_or(false) {
             let data = json

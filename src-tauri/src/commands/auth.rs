@@ -1,7 +1,26 @@
 use crate::db::Database;
 use crate::pan115::auth::{AuthClient, LoginStatus};
+use crate::pan115::client::ProxyConfig;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+fn get_proxy_config(db: &Database) -> ProxyConfig {
+    let config_str = db
+        .get_setting("proxy_config")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    serde_json::from_str(&config_str).unwrap_or_default()
+}
+
+fn make_auth_client(db: Option<&Database>) -> AuthClient {
+    if let Some(db) = db {
+        let cfg = get_proxy_config(db);
+        AuthClient::with_proxy(&cfg)
+    } else {
+        AuthClient::new()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QrCodeResponse {
@@ -35,7 +54,7 @@ pub async fn poll_qrcode_login(
     state: State<'_, Database>,
     token: String,
 ) -> Result<PollResponse, String> {
-    let client = AuthClient::new();
+    let client = make_auth_client(Some(&*state));
     let result = client.poll_qr_token(&token).await.map_err(|e| e.to_string())?;
 
     if result.status == 2 {
@@ -82,7 +101,7 @@ pub async fn login_by_cookie(
         return Err("Cookie不能为空".to_string());
     }
 
-    let client = AuthClient::new();
+    let client = make_auth_client(Some(&*state));
     let user_info = client
         .validate_cookie(&cookie)
         .await
@@ -119,7 +138,7 @@ pub async fn get_login_status(state: State<'_, Database>) -> Result<LoginStatus,
     let cookie = state.get_setting("auth_cookie").map_err(|e| e.to_string())?;
 
     if let Some(cookie_str) = cookie {
-        let client = AuthClient::new();
+        let client = make_auth_client(Some(&*state));
         match client.validate_cookie(&cookie_str).await {
             Ok(info) => {
                 let login_time = state
