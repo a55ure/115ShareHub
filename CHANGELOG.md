@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0] — 2026-05-02
+
+### 修复
+- **转存到指定目录**：`/share/receive` 接口 `cid` 参数即为目标文件夹 ID，之前误传为分享内的目录 ID 导致文件始终进根目录。参考 TgtoDrive 和 115sharebatchsave 确认接口规范。
+- **账号管理页面打不开**：`@vicons/ionicons5` 无 `ChevronRight` 导出（应为 `ChevronForward`），TypeScript 编译报错导致 Vue Router 懒加载失败，点击菜单无反应。
+- **分页始终只显示 1 页**：Naive UI `NDataTable` 内建 `pagination` 为客户端分页，根据 `data` 数组长度计算页数而忽略 `itemCount`。改为独立 `NPagination` 组件，正确按服务端返回的 `total` 计算页数。
+
+### 变更
+- 默认每页条数从 50 改为 10
+- 仪表盘和搜索页新增每页条数选择器（10/20/50/100）
+- `receive_share_file` 移除冗余的 `to_cid` 和 move 兜底逻辑
+
+### 文档
+- README 新增软件截图（review.png）
+- README 更新功能描述：转存到指定目录、分页浏览
+- README 参考项目新增 TgtoDrive、115sharebatchsave
+- 版本号升至 0.4.0
+
 ## [0.3.0] — 2026-05-02
 
 ### 新增
