@@ -5,12 +5,30 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 fn get_proxy_config(db: &Database) -> ProxyConfig {
-    let config_str = db
-        .get_setting("proxy_config")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    serde_json::from_str(&config_str).unwrap_or_default()
+    // Try new multi-proxy format first
+    if let Ok(Some(configs_str)) = db.get_setting("proxy_configs") {
+        if !configs_str.is_empty() {
+            if let Ok(configs) = serde_json::from_str::<Vec<ProxyConfig>>(&configs_str) {
+                if let Some(cfg) = configs.into_iter().find(|c| c.enabled && !c.host.is_empty()) {
+                    log::info!("AuthClient using proxy from proxy_configs: {}:{}", cfg.host, cfg.port);
+                    return cfg;
+                }
+            }
+        }
+    }
+    // Fall back to old single-proxy format
+    if let Ok(Some(config_str)) = db.get_setting("proxy_config") {
+        if !config_str.is_empty() {
+            if let Ok(cfg) = serde_json::from_str::<ProxyConfig>(&config_str) {
+                if cfg.enabled && !cfg.host.is_empty() {
+                    log::info!("AuthClient using proxy from proxy_config: {}:{}", cfg.host, cfg.port);
+                    return cfg;
+                }
+            }
+        }
+    }
+    log::info!("AuthClient: no proxy configured, using direct connection");
+    ProxyConfig::default()
 }
 
 fn make_auth_client(db: Option<&Database>) -> AuthClient {
