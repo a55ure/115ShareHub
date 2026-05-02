@@ -5,8 +5,8 @@ use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QrCodeResponse {
-    pub uid: String,
-    pub qr_image_base64: String,
+    pub token: String,
+    pub qr_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,39 +23,29 @@ pub struct CookieLoginRequest {
 #[tauri::command]
 pub async fn init_qrcode_login() -> Result<QrCodeResponse, String> {
     let client = AuthClient::new();
-    let result = client.get_qrcode().await.map_err(|e| e.to_string())?;
+    let result = client.get_qr_token().await.map_err(|e| e.to_string())?;
     Ok(QrCodeResponse {
-        uid: result.uid,
-        qr_image_base64: result.qr_image_base64,
+        qr_url: format!("https://115.com/login/?qrcode={}", result.token),
+        token: result.token,
     })
 }
 
 #[tauri::command]
 pub async fn poll_qrcode_login(
     state: State<'_, Database>,
-    uid: String,
+    token: String,
 ) -> Result<PollResponse, String> {
     let client = AuthClient::new();
-    let result = client.poll_qrcode(&uid).await.map_err(|e| e.to_string())?;
+    let result = client.poll_qr_token(&token).await.map_err(|e| e.to_string())?;
 
     if result.status == 2 {
-        // Confirmed — exchange for login cookie
-        let cookie = if let Some(c) = result.cookie {
-            c
-        } else {
-            client
-                .exchange_qrcode_login(&uid)
-                .await
-                .map_err(|e| e.to_string())?
-        };
+        let cookie = result.cookie.ok_or_else(|| "登录成功但未获取到cookie".to_string())?;
 
-        // Validate and get user info
         let user_info = client
             .validate_cookie(&cookie)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Cookie验证失败: {}", e))?;
 
-        // Save to DB
         state.set_setting("auth_cookie", &cookie).map_err(|e| e.to_string())?;
         state
             .set_setting("auth_user_name", &user_info.user_name)
@@ -129,7 +119,6 @@ pub async fn get_login_status(state: State<'_, Database>) -> Result<LoginStatus,
     let cookie = state.get_setting("auth_cookie").map_err(|e| e.to_string())?;
 
     if let Some(cookie_str) = cookie {
-        // Validate existing cookie
         let client = AuthClient::new();
         match client.validate_cookie(&cookie_str).await {
             Ok(info) => {
@@ -145,7 +134,6 @@ pub async fn get_login_status(state: State<'_, Database>) -> Result<LoginStatus,
                 })
             }
             Err(_) => {
-                // Cookie expired, clear it
                 clear_auth_settings(&state)?;
                 Ok(LoginStatus {
                     logged_in: false,

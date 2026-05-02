@@ -3,8 +3,9 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import {
   NCard, NTabs, NTabPane, NButton, NInput, NForm, NFormItem, NSpace,
   NAvatar, NDescriptions, NDescriptionsItem, NPopconfirm, NAlert,
-  NSpin, NResult, useMessage,
+  NSpin, useMessage,
 } from 'naive-ui'
+import QrcodeVue from 'qrcode.vue'
 import type { LoginStatus } from '../types'
 import {
   initQrcodeLogin, pollQrcodeLogin, loginByCookie, getLoginStatus, logout,
@@ -15,8 +16,8 @@ const loginStatus = ref<LoginStatus | null>(null)
 const loading = ref(true)
 
 // QR code state
-const qrImage = ref('')
-const qrUid = ref('')
+const qrUrl = ref('')
+const qrToken = ref('')
 const qrLoading = ref(false)
 const qrPolling = ref(false)
 const qrStatusText = ref('')
@@ -56,10 +57,11 @@ async function handleLogout() {
 async function startQrLogin() {
   qrLoading.value = true
   qrStatusText.value = ''
+  stopPolling()
   try {
     const resp = await initQrcodeLogin()
-    qrImage.value = resp.qr_image_base64
-    qrUid.value = resp.uid
+    qrToken.value = resp.token
+    qrUrl.value = resp.qr_url
     qrStatusText.value = '请使用115网盘APP扫描二维码'
     startPolling()
   } catch (e: any) {
@@ -74,7 +76,7 @@ function startPolling() {
   qrPolling.value = true
   pollTimer = setInterval(async () => {
     try {
-      const result = await pollQrcodeLogin(qrUid.value)
+      const result = await pollQrcodeLogin(qrToken.value)
       if (result.status === 0) {
         qrStatusText.value = '等待扫码...'
       } else if (result.status === 1) {
@@ -83,7 +85,6 @@ function startPolling() {
         stopPolling()
         loginStatus.value = await getLoginStatus()
         message.success('登录成功')
-        qrStatusText.value = '登录成功'
       } else if (result.status === -1) {
         stopPolling()
         qrStatusText.value = '二维码已过期，请重新获取'
@@ -161,16 +162,15 @@ async function handleCookieLogin() {
         <NTabs type="card">
           <NTabPane name="qrcode" tab="扫码登录">
             <NSpace vertical align="center" :size="16" style="padding: 24px 0;">
-              <div v-if="qrImage" style="text-align: center;">
-                <img
-                  :src="qrImage"
-                  alt="115登录二维码"
-                  style="width: 220px; height: 220px; border: 1px solid #e0e0e0; border-radius: 8px;"
-                />
-                <p style="margin-top: 8px; color: #666;">{{ qrStatusText }}</p>
+              <div v-if="qrUrl" style="text-align: center;">
+                <div style="display: inline-block; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e0e0e0;">
+                  <QrcodeVue :value="qrUrl" :size="200" level="M" />
+                </div>
+                <p style="margin-top: 12px; color: #666;">{{ qrStatusText }}</p>
               </div>
-              <NResult v-else-if="!qrPolling" title="点击下方按钮获取二维码" :style="{ padding: '24px 0' }" />
-              <NSpin v-else :description="qrStatusText" />
+              <div v-else style="padding: 40px 0; text-align: center; color: #999;">
+                点击下方按钮获取登录二维码
+              </div>
               <NSpace>
                 <NButton type="primary" :loading="qrLoading" @click="startQrLogin">
                   {{ qrPolling ? '重新获取' : '获取二维码' }}

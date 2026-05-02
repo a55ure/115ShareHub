@@ -85,8 +85,8 @@ export interface LoginStatus {
 }
 
 export interface QrCodeResponse {
-  uid: string
-  qr_image_base64: string
+  token: string
+  qr_url: string
 }
 
 export interface PollResponse {
