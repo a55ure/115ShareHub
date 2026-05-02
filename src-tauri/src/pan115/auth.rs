@@ -49,16 +49,36 @@ impl AuthClient {
         let resp = self
             .http
             .get("https://passportapi.115.com/app/1.0/web/1.0/qrcode/token")
-            .header("Accept", "application/json")
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .header("Referer", "https://115.com/")
+            .header("Origin", "https://115.com")
             .send()
             .await?;
 
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("QR token response (HTTP {}): {}", status, &text[..text.len().min(500)]);
+        log::info!(
+            "QR token response (HTTP {}): {} bytes, body: {}",
+            status,
+            text.len(),
+            &text[..text.len().min(500)]
+        );
 
         if !status.is_success() {
+            let preview = &text[..text.len().min(200)];
+            if preview.trim().starts_with('<') {
+                return Err(ApiError::Api("获取二维码token失败: 被115服务器拦截, 请稍后再试".to_string()));
+            }
             return Err(ApiError::Api(format!("获取二维码token失败: HTTP {}", status)));
+        }
+
+        if text.trim().is_empty() {
+            return Err(ApiError::Parse("获取二维码token失败: 服务器返回空响应".to_string()));
+        }
+
+        if text.trim().starts_with('<') {
+            return Err(ApiError::Parse("获取二维码token失败: 服务器返回HTML而非JSON (可能被WAF拦截)".to_string()));
         }
 
         let json: serde_json::Value =
@@ -84,16 +104,32 @@ impl AuthClient {
                 "https://passportapi.115.com/app/1.0/web/1.0/qrcode/poll?token={}",
                 token
             ))
-            .header("Accept", "application/json")
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .header("Referer", "https://115.com/")
+            .header("Origin", "https://115.com")
             .send()
             .await?;
 
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("QR poll response (HTTP {}): {}", status, &text[..text.len().min(500)]);
+        log::info!(
+            "QR poll response (HTTP {}): {} bytes, body: {}",
+            status,
+            text.len(),
+            &text[..text.len().min(500)]
+        );
 
         if !status.is_success() {
             return Err(ApiError::Api(format!("轮询失败: HTTP {}", status)));
+        }
+
+        if text.trim().is_empty() {
+            return Err(ApiError::Parse("轮询失败: 服务器返回空响应".to_string()));
+        }
+
+        if text.trim().starts_with('<') {
+            return Err(ApiError::Parse("轮询失败: 服务器返回HTML而非JSON".to_string()));
         }
 
         let json: serde_json::Value =
