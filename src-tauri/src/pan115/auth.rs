@@ -49,13 +49,19 @@ impl AuthClient {
                 "{}://{}:{}",
                 proxy_config.proxy_type, proxy_config.host, proxy_config.port
             );
-            if let Ok(mut proxy) = reqwest::Proxy::all(&proxy_url) {
-                if let (Some(u), Some(p)) = (&proxy_config.username, &proxy_config.password) {
-                    if !u.is_empty() {
-                        proxy = proxy.basic_auth(u, p);
+            match reqwest::Proxy::all(&proxy_url) {
+                Ok(mut proxy) => {
+                    if let (Some(u), Some(p)) = (&proxy_config.username, &proxy_config.password) {
+                        if !u.is_empty() {
+                            proxy = proxy.basic_auth(u, p);
+                        }
                     }
+                    builder = builder.proxy(proxy);
+                    log::info!("AuthClient: attached proxy {}", proxy_url);
                 }
-                builder = builder.proxy(proxy);
+                Err(e) => {
+                    log::error!("AuthClient: failed to create proxy {}: {} (missing reqwest/socks feature?)", proxy_url, e);
+                }
             }
         }
 
