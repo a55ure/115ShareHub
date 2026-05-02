@@ -1,7 +1,9 @@
 use super::types::ShareSnapResponse;
 use reqwest::Client;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -13,20 +15,28 @@ pub enum ApiError {
     Parse(String),
 }
 
+/// Rate-limited 115 API client.
+/// Uses a mutex + timestamp to enforce a minimum interval between requests,
+/// ensuring they are truly spaced out rather than bursting.
 pub struct Pan115Client {
     http: Client,
-    delay: Duration,
+    last_request: Arc<Mutex<std::time::Instant>>,
+    min_interval: Duration,
 }
 
 impl Pan115Client {
-    pub fn new(rate_limit_rps: u32) -> Self {
-        let delay = Duration::from_millis(1000 / rate_limit_rps.max(1) as u64);
+    pub fn new(requests_per_second: u32) -> Self {
+        let interval = Duration::from_millis(1000 / requests_per_second.max(1) as u64);
         let http = Client::builder()
-            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build HTTP client");
-        Pan115Client { http, delay }
+        Pan115Client {
+            http,
+            last_request: Arc::new(Mutex::new(std::time::Instant::now())),
+            min_interval: interval,
+        }
     }
 
     pub async fn fetch_share_snap(
@@ -37,7 +47,14 @@ impl Pan115Client {
         limit: u32,
         offset: u32,
     ) -> Result<ShareSnapResponse, ApiError> {
-        tokio::time::sleep(self.delay).await;
+        {
+            let mut last = self.last_request.lock().await;
+            let elapsed = last.elapsed();
+            if elapsed < self.min_interval {
+                tokio::time::sleep(self.min_interval - elapsed).await;
+            }
+            *last = std::time::Instant::now();
+        }
 
         let referer = format!(
             "https://115cdn.com/s/{}?password={}&",
@@ -54,27 +71,32 @@ impl Pan115Client {
             .get(&url)
             .header("Referer", &referer)
             .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .send()
             .await?;
 
         let status = resp.status();
-        let text = resp.text().await.map_err(|e| ApiError::Network(e))?;
+        let text = resp.text().await.map_err(ApiError::Network)?;
 
-        log::info!("115 API response status: {}, body length: {}", status, text.len());
-        log::debug!("115 API response body (first 2000 chars): {}", &text[..text.len().min(2000)]);
+        log::info!("115 API status: {}, body: {} bytes, path: cid={}", status, text.len(), cid);
 
         if !status.is_success() {
-            return Err(ApiError::Api(format!("HTTP {}: {}", status, &text[..text.len().min(500)])));
+            let preview = &text[..text.len().min(100)];
+            if preview.trim().starts_with('<') {
+                log::warn!("115 returned HTML (WAF block), status: {}", status);
+                return Err(ApiError::Api(format!("被115服务器拦截 (HTTP {}), 请稍后再试或降低并发", status)));
+            }
+            return Err(ApiError::Api(format!("HTTP {}: {}", status, &text[..text.len().min(200)])));
         }
 
         if text.trim().starts_with('<') {
-            return Err(ApiError::Parse(format!("Got HTML instead of JSON (length {}), API may require auth or the link is invalid", text.len())));
+            return Err(ApiError::Parse("Got HTML instead of JSON".to_string()));
         }
 
         let body: ShareSnapResponse = serde_json::from_str(&text).map_err(|e| {
             let preview = &text[..text.len().min(500)];
-            log::error!("JSON parse error: {}, body preview: {}", e, preview);
-            ApiError::Parse(format!("JSON decode error: {} - body starts with: {}", e, &preview[..preview.len().min(200)]))
+            log::error!("JSON parse error: {}, preview: {}", e, preview);
+            ApiError::Parse(format!("JSON decode error: {}", e))
         })?;
 
         if !body.state {

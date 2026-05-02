@@ -51,69 +51,21 @@ pub async fn add_share_link(
         let client = Pan115Client::new(2);
         let parser = ShareLinkParser::new(client, 1150);
 
-        db.update_share_link_status(id, "parsing", None)
-            .ok();
+        db.update_share_link_status(id, "parsing", None).ok();
 
         match parser
-            .parse_share_link(&share_code_clone, &receive_code_clone, id, &|_| {}, &app_handle)
+            .parse_share_link(&share_code_clone, &receive_code_clone, id, &app_handle, &db)
             .await
         {
             Ok(result) => {
-                let file_data: Vec<(i64, &str, &str, &str, i64, &str, bool, &str, &str, i32, &str)> = result
-                    .files
-                    .iter()
-                    .map(|f| {
-                        (
-                            id,
-                            f.file_id.as_str(),
-                            f.parent_id.as_str(),
-                            f.name.as_str(),
-                            f.size,
-                            f.sha1.as_str(),
-                            f.is_dir,
-                            f.file_type.as_str(),
-                            f.full_path.as_str(),
-                            f.depth,
-                            f.thumbnail_url.as_str(),
-                        )
-                    })
-                    .collect();
-
-                if let Err(e) = db.insert_files_batch(&file_data) {
-                    db.update_share_link_status(id, "error", Some(&e.to_string()))
-                        .ok();
-                    let _ = app_handle.emit(
-                        "share-link-error",
-                        serde_json::json!({ "share_link_id": id, "error": e.to_string() }),
-                    );
-                    return;
-                }
-
-                let title = result
-                    .share_info
-                    .as_ref()
-                    .map(|si| si.share_title.clone())
-                    .unwrap_or_default();
-                let user_id = result
-                    .user_info
-                    .as_ref()
-                    .map(|ui| ui.user_id.clone())
-                    .unwrap_or_default();
-                let user_name = result
-                    .user_info
-                    .as_ref()
-                    .map(|ui| ui.user_name.clone())
-                    .unwrap_or_default();
+                let title = result.share_info.as_ref().map(|si| si.share_title.clone()).unwrap_or_default();
+                let user_id = result.user_info.as_ref().map(|ui| ui.user_id.clone()).unwrap_or_default();
+                let user_name = result.user_info.as_ref().map(|ui| ui.user_name.clone()).unwrap_or_default();
 
                 db.update_share_link_metadata(
-                    id,
-                    &title,
-                    &user_id,
-                    &user_name,
-                    result.total_files as i64,
-                    result.total_size,
-                )
-                .ok();
+                    id, &title, &user_id, &user_name,
+                    result.total_files as i64, result.total_size,
+                ).ok();
 
                 let _ = app_handle.emit(
                     "share-link-completed",
@@ -125,8 +77,7 @@ pub async fn add_share_link(
                 );
             }
             Err(e) => {
-                db.update_share_link_status(id, "error", Some(&e.to_string()))
-                    .ok();
+                db.update_share_link_status(id, "error", Some(&e.to_string())).ok();
                 let _ = app_handle.emit(
                     "share-link-error",
                     serde_json::json!({ "share_link_id": id, "error": e.to_string() }),
@@ -152,12 +103,7 @@ pub async fn list_share_links(
     let (items, total) = state
         .list_share_links(page, page_size)
         .map_err(|e| e.to_string())?;
-    Ok(PaginatedResult {
-        items,
-        total,
-        page,
-        page_size,
-    })
+    Ok(PaginatedResult { items, total, page, page_size })
 }
 
 #[tauri::command]
@@ -172,9 +118,7 @@ pub async fn refresh_share_link(
         .ok_or("Share link not found")?;
 
     state.delete_files_by_share_link(id).map_err(|e| e.to_string())?;
-    state
-        .update_share_link_status(id, "pending", None)
-        .map_err(|e| e.to_string())?;
+    state.update_share_link_status(id, "pending", None).map_err(|e| e.to_string())?;
 
     let db: Database = state.inner().clone();
     let app_handle = app.clone();
@@ -185,71 +129,21 @@ pub async fn refresh_share_link(
         let client = Pan115Client::new(2);
         let parser = ShareLinkParser::new(client, 1150);
 
-        db.update_share_link_status(id, "parsing", None)
-            .ok();
+        db.update_share_link_status(id, "parsing", None).ok();
 
         match parser
-            .parse_share_link(
-                &share_code,
-                &receive_code,
-                id,
-                &|_| {},
-                &app_handle,
-            )
+            .parse_share_link(&share_code, &receive_code, id, &app_handle, &db)
             .await
         {
             Ok(result) => {
-                let file_data: Vec<(i64, &str, &str, &str, i64, &str, bool, &str, &str, i32, &str)> = result
-                    .files
-                    .iter()
-                    .map(|f| {
-                        (
-                            id,
-                            f.file_id.as_str(),
-                            f.parent_id.as_str(),
-                            f.name.as_str(),
-                            f.size,
-                            f.sha1.as_str(),
-                            f.is_dir,
-                            f.file_type.as_str(),
-                            f.full_path.as_str(),
-                            f.depth,
-                            f.thumbnail_url.as_str(),
-                        )
-                    })
-                    .collect();
-
-                if let Err(e) = db.insert_files_batch(&file_data) {
-                    db.update_share_link_status(id, "error", Some(&e.to_string()))
-                        .ok();
-                    return;
-                }
-
-                let title = result
-                    .share_info
-                    .as_ref()
-                    .map(|si| si.share_title.clone())
-                    .unwrap_or_default();
-                let user_id = result
-                    .user_info
-                    .as_ref()
-                    .map(|ui| ui.user_id.clone())
-                    .unwrap_or_default();
-                let user_name = result
-                    .user_info
-                    .as_ref()
-                    .map(|ui| ui.user_name.clone())
-                    .unwrap_or_default();
+                let title = result.share_info.as_ref().map(|si| si.share_title.clone()).unwrap_or_default();
+                let user_id = result.user_info.as_ref().map(|ui| ui.user_id.clone()).unwrap_or_default();
+                let user_name = result.user_info.as_ref().map(|ui| ui.user_name.clone()).unwrap_or_default();
 
                 db.update_share_link_metadata(
-                    id,
-                    &title,
-                    &user_id,
-                    &user_name,
-                    result.total_files as i64,
-                    result.total_size,
-                )
-                .ok();
+                    id, &title, &user_id, &user_name,
+                    result.total_files as i64, result.total_size,
+                ).ok();
 
                 let _ = app_handle.emit(
                     "share-link-completed",
@@ -261,8 +155,7 @@ pub async fn refresh_share_link(
                 );
             }
             Err(e) => {
-                db.update_share_link_status(id, "error", Some(&e.to_string()))
-                    .ok();
+                db.update_share_link_status(id, "error", Some(&e.to_string())).ok();
                 let _ = app_handle.emit(
                     "share-link-error",
                     serde_json::json!({ "share_link_id": id, "error": e.to_string() }),
@@ -271,6 +164,21 @@ pub async fn refresh_share_link(
         }
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_share_link(
+    state: State<'_, Database>,
+    id: i64,
+    title: String,
+    receive_code: String,
+) -> Result<(), String> {
+    let conn = state.get_conn();
+    conn.execute(
+        "UPDATE share_links SET title = ?1, receive_code = ?2 WHERE id = ?3",
+        rusqlite::params![title, receive_code, id],
+    ).map_err(|e| e.to_string())?;
     Ok(())
 }
 

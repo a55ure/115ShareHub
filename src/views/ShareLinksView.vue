@@ -2,11 +2,12 @@
 import { ref, h, onMounted, onUnmounted } from 'vue'
 import {
   NButton, NDataTable, NSpace, NTag, NModal, NForm, NFormItem, NInput,
-  NPopconfirm, useMessage, NSpin,
+  NPopconfirm, useMessage, NSpin, NAlert,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useShareLinksStore } from '../stores/shareLinks'
 import { formatFileSize, formatDate } from '../utils/format'
+import { updateShareLink } from '../utils/tauri'
 import type { ShareLink } from '../types'
 import { listen } from '@tauri-apps/api/event'
 
@@ -14,9 +15,14 @@ const store = useShareLinksStore()
 const message = useMessage()
 
 const showModal = ref(false)
+const showEditModal = ref(false)
 const shareUrl = ref('')
 const receiveCode = ref('')
 const submitting = ref(false)
+
+const editingId = ref(0)
+const editTitle = ref('')
+const editReceiveCode = ref('')
 
 onMounted(async () => {
   await store.fetchLinks(1)
@@ -61,6 +67,24 @@ async function handleAdd() {
   }
 }
 
+function openEdit(link: ShareLink) {
+  editingId.value = link.id
+  editTitle.value = link.title
+  editReceiveCode.value = link.receive_code
+  showEditModal.value = true
+}
+
+async function handleEdit() {
+  try {
+    await updateShareLink(editingId.value, editTitle.value, editReceiveCode.value)
+    message.success('已更新')
+    showEditModal.value = false
+    store.fetchLinks(store.currentPage)
+  } catch (e: any) {
+    message.error(`更新失败: ${e}`)
+  }
+}
+
 async function handleDelete(id: number) {
   try {
     await store.deleteLink(id)
@@ -92,15 +116,16 @@ function statusTag(status: string) {
 
 const columns: DataTableColumns<ShareLink> = [
   { title: '标题', key: 'title', ellipsis: { tooltip: true }, render: (row) => row.title || row.share_code },
-  { title: '文件数', key: 'total_file_count', width: 100 },
-  { title: '总大小', key: 'total_size', width: 120, render: (row) => formatFileSize(row.total_size) },
-  { title: '状态', key: 'status', width: 100, render: (row) => statusTag(row.status) },
-  { title: '添加时间', key: 'added_at', width: 180, render: (row) => formatDate(row.added_at) },
+  { title: '文件数', key: 'total_file_count', width: 90 },
+  { title: '总大小', key: 'total_size', width: 110, render: (row) => formatFileSize(row.total_size) },
+  { title: '状态', key: 'status', width: 90, render: (row) => statusTag(row.status) },
+  { title: '添加时间', key: 'added_at', width: 160, render: (row) => formatDate(row.added_at) },
   {
-    title: '操作', key: 'actions', width: 180,
+    title: '操作', key: 'actions', width: 240,
     render: (row) =>
       h(NSpace, { size: 'small' }, {
         default: () => [
+          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
           h(NButton, { size: 'small', onClick: () => handleRefresh(row.id) }, { default: () => '刷新' }),
           h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
             trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
@@ -130,12 +155,27 @@ const columns: DataTableColumns<ShareLink> = [
 
     <NModal v-model:show="showModal" preset="dialog" title="添加115分享链接" positive-text="添加" negative-text="取消"
       :loading="submitting" @positive-click="handleAdd">
+      <NAlert type="warning" :bordered="false" style="margin-bottom: 12px;">
+        为避免被115服务器封控，解析请求限速为2次/秒。包含大量文件或子目录的分享链接可能需要较长时间，请耐心等待。
+      </NAlert>
       <NForm>
         <NFormItem label="分享链接">
           <NInput v-model:value="shareUrl" placeholder="https://115cdn.com/s/xxxxx 或分享码" />
         </NFormItem>
         <NFormItem label="提取码">
           <NInput v-model:value="receiveCode" placeholder="选填" />
+        </NFormItem>
+      </NForm>
+    </NModal>
+
+    <NModal v-model:show="showEditModal" preset="dialog" title="编辑分享链接" positive-text="保存" negative-text="取消"
+      @positive-click="handleEdit">
+      <NForm>
+        <NFormItem label="标题">
+          <NInput v-model:value="editTitle" placeholder="分享链接标题" />
+        </NFormItem>
+        <NFormItem label="提取码">
+          <NInput v-model:value="editReceiveCode" placeholder="提取码" />
         </NFormItem>
       </NForm>
     </NModal>

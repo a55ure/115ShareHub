@@ -22,6 +22,7 @@ pub fn run() {
             commands::share_links::remove_share_link,
             commands::share_links::list_share_links,
             commands::share_links::refresh_share_link,
+            commands::share_links::update_share_link,
             commands::share_links::get_share_link_detail,
             commands::search::search_files,
             commands::search::get_file_stats,

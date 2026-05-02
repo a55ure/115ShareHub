@@ -26,6 +26,10 @@ export async function refreshShareLink(id: number): Promise<void> {
   return invoke('refresh_share_link', { id })
 }
 
+export async function updateShareLink(id: number, title: string, receiveCode: string): Promise<void> {
+  return invoke('update_share_link', { id, title, receiveCode })
+}
+
 export async function getShareLinkDetail(id: number): Promise<ShareLinkDetail> {
   return invoke<ShareLinkDetail>('get_share_link_detail', { id })
 }
