@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0] — 2026-05-02
+
+### 新增
+- **Cookie 登录**：基于 AList 的正确 API 端点（`passportapi.115.com/check/sso` + `my.115.com/?ct=ajax&ac=nav`），支持用户信息展示（用户名、头像、ID）
+- **一键转存到网盘**：仪表盘和搜索页面新增「转存」按钮，登录后可一键保存分享文件到自己的115网盘根目录
+- **SOCKS5 代理支持**：`reqwest` 启用 `socks` feature，Clash Verge 等本地代理可直接使用
+- **FTS5 + LIKE 双路搜索**：模糊搜索同时使用 FTS5 前缀匹配和 LIKE 子串匹配，部分文件名也能命中
+
+### 修复
+- **Cookie 登录无用户信息**：原有 `webapi.115.com/user/info` 端点只返回掩码手机号，已替换为 AList 的正确端点
+- **SOCKS5 代理无效**：`reqwest` 缺少 `socks` feature 导致 `Proxy::all("socks5://...")` 静默失败回退直连
+- **代理配置读取不一致**：`AuthClient` 只读旧格式 `proxy_config`，已改为优先读取新格式 `proxy_configs`
+- **二维码端点错误**：`passportapi.115.com` 返回 HTML 拦截页，已改为 `qrcodeapi.115.com`
+
+### 变更
+- `AuthClient` 重构：支持代理、WAF 检测、双端点验证
+
 ## [0.2.0] — 2026-05-02
 
 ### 新增
