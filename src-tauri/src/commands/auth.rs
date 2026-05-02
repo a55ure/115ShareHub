@@ -71,7 +71,7 @@ pub async fn init_qrcode_login() -> Result<QrCodeResponse, String> {
     let client = AuthClient::new();
     let result = client.get_qr_token().await.map_err(|e| e.to_string())?;
     Ok(QrCodeResponse {
-        qr_url: format!("https://115.com/login/?qrcode={}", result.token),
+        qr_url: format!("https://qrcodeapi.115.com/api/1.0/mac/1.0/qrcode?uid={}", result.token),
         token: result.token,
     })
 }

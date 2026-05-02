@@ -60,7 +60,7 @@ impl AuthClient {
                     log::info!("AuthClient: attached proxy {}", proxy_url);
                 }
                 Err(e) => {
-                    log::error!("AuthClient: failed to create proxy {}: {} (missing reqwest/socks feature?)", proxy_url, e);
+                    log::error!("AuthClient: failed to create proxy {}: {}", proxy_url, e);
                 }
             }
         }
@@ -69,11 +69,12 @@ impl AuthClient {
         AuthClient { http }
     }
 
-    /// Step 1: Get QR login token from 115 passport API.
+    /// Get QR login token from 115 QR code API.
+    /// Ref: AList uses qrcodeapi.115.com, not passportapi.115.com.
     pub async fn get_qr_token(&self) -> Result<QrTokenResult, ApiError> {
         let resp = self
             .http
-            .get("https://passportapi.115.com/app/1.0/web/1.0/qrcode/token")
+            .get("https://qrcodeapi.115.com/api/1.0/web/1.0/token")
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .header("Referer", "https://115.com/")
@@ -83,52 +84,33 @@ impl AuthClient {
 
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!(
-            "QR token response (HTTP {}): {} bytes, body: {}",
-            status,
-            text.len(),
-            &text[..text.len().min(500)]
-        );
+        log::info!("QR token response (HTTP {}): {} bytes", status, text.len());
 
-        if !status.is_success() {
-            let preview = &text[..text.len().min(200)];
-            if preview.trim().starts_with('<') {
-                return Err(ApiError::Api("获取二维码token失败: 被115服务器拦截, 请稍后再试".to_string()));
-            }
-            return Err(ApiError::Api(format!("获取二维码token失败: HTTP {}", status)));
-        }
-
-        if text.trim().is_empty() {
-            return Err(ApiError::Parse("获取二维码token失败: 服务器返回空响应".to_string()));
-        }
-
-        if text.trim().starts_with('<') {
-            return Err(ApiError::Parse("获取二维码token失败: 服务器返回HTML而非JSON (可能被WAF拦截)".to_string()));
+        if !status.is_success() || text.trim().starts_with('<') {
+            return Err(ApiError::Api("获取二维码token失败: 被115服务器拦截".to_string()));
         }
 
         let json: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
 
+        // AList QRCodeTokenResp: { state: 1 (success), data: { uid: "...", ... } }
         let token = json
             .get("data")
-            .and_then(|d| d.get("token"))
-            .or_else(|| json.get("token"))
+            .and_then(|d| d.get("uid"))
+            .or_else(|| json.get("data").and_then(|d| d.get("token")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| ApiError::Parse(format!("响应中未找到token: {}", &text[..text.len().min(200)])))?;
+            .ok_or_else(|| ApiError::Parse("响应中未找到token/uid".to_string()))?;
 
         Ok(QrTokenResult { token })
     }
 
-    /// Step 2: Poll QR code scan status with token.
+    /// Poll QR code scan status. Uses qrcodeapi.115.com.
     /// status: 0=等待扫码, 1=已扫码待确认, 2=已确认登录, -1=已过期
-    pub async fn poll_qr_token(&self, token: &str) -> Result<PollResult, ApiError> {
+    pub async fn poll_qr_token(&self, uid: &str) -> Result<PollResult, ApiError> {
         let resp = self
             .http
-            .get(&format!(
-                "https://passportapi.115.com/app/1.0/web/1.0/qrcode/poll?token={}",
-                token
-            ))
+            .get(&format!("https://qrcodeapi.115.com/get/status/?uid={}", uid))
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .header("Referer", "https://115.com/")
@@ -136,39 +118,24 @@ impl AuthClient {
             .send()
             .await?;
 
-        let status = resp.status();
+        let status_code = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!(
-            "QR poll response (HTTP {}): {} bytes, body: {}",
-            status,
-            text.len(),
-            &text[..text.len().min(500)]
-        );
+        log::info!("QR poll response (HTTP {}): {} bytes", status_code, text.len());
 
-        if !status.is_success() {
-            return Err(ApiError::Api(format!("轮询失败: HTTP {}", status)));
-        }
-
-        if text.trim().is_empty() {
-            return Err(ApiError::Parse("轮询失败: 服务器返回空响应".to_string()));
-        }
-
-        if text.trim().starts_with('<') {
-            return Err(ApiError::Parse("轮询失败: 服务器返回HTML而非JSON".to_string()));
+        if !status_code.is_success() || text.trim().starts_with('<') {
+            return Err(ApiError::Api("轮询失败: 被115服务器拦截".to_string()));
         }
 
         let json: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
 
-        // Extract status from data
         let poll_status = json
             .get("data")
             .and_then(|d| d.get("status"))
-            .or_else(|| json.get("status"))
             .and_then(|v| v.as_i64())
             .unwrap_or(-1) as i32;
 
-        // When status=2, extract cookie from response
+        // When status=2, extract cookie from data.cookie
         let cookie = if poll_status == 2 {
             json.get("data")
                 .and_then(|d| d.get("cookie"))
@@ -178,83 +145,85 @@ impl AuthClient {
             None
         };
 
-        Ok(PollResult {
-            status: poll_status,
-            cookie,
-        })
+        Ok(PollResult { status: poll_status, cookie })
     }
 
-    /// Validate a cookie string by fetching user info from 115.
+    /// Validate cookie and get user info.
+    /// Step 1: call check/sso to verify login and get user_id.
+    /// Step 2: call my.115.com/?ct=ajax&ac=nav to get user_name and face.
     pub async fn validate_cookie(&self, cookie: &str) -> Result<UserInfo115, ApiError> {
-        let resp = self
+        // Step 1: login check — verifies cookie validity, returns user_id.
+        // Response: { state: 0 (success), data: { user_id: N, expire: ..., link: ... } }
+        let check_resp = self
             .http
-            .get("https://webapi.115.com/user/info")
+            .get("https://passportapi.115.com/app/1.0/web/1.0/check/sso")
             .header("Cookie", cookie)
             .header("Accept", "application/json, text/plain, */*")
             .header("Referer", "https://115.com/")
             .send()
             .await?;
 
-        let status = resp.status();
-        let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("validate_cookie HTTP {}: {} bytes, body: {}", status, text.len(), &text[..text.len().min(500)]);
+        let check_text = check_resp.text().await.map_err(ApiError::Network)?;
+        log::info!("check/sso: {} bytes, body: {}", check_text.len(), &check_text[..check_text.len().min(300)]);
 
-        if !status.is_success() {
-            return Err(ApiError::Api(format!("Cookie验证失败: HTTP {}", status)));
+        if check_text.trim().starts_with('<') {
+            return Err(ApiError::Api("Cookie验证被115拦截，请检查代理".to_string()));
         }
 
-        if text.trim().is_empty() {
-            return Err(ApiError::Api("Cookie验证失败: 服务器返回空响应".to_string()));
+        let check_json: serde_json::Value =
+            serde_json::from_str(&check_text).map_err(|e| ApiError::Parse(format!("check/sso JSON解析失败: {}", e)))?;
+
+        // AList LoginResp: state: 0 = success
+        let state_val = check_json.get("state").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if state_val != 0 {
+            let err = check_json.get("error").and_then(|v| v.as_str()).unwrap_or("Cookie无效或已过期");
+            return Err(ApiError::Api(err.to_string()));
         }
 
-        if text.trim().starts_with('<') {
-            log::warn!("validate_cookie: got HTML instead of JSON (WAF block)");
-            return Err(ApiError::Api("Cookie验证被115拦截, 请检查代理设置或稍后再试".to_string()));
+        let user_id = check_json
+            .get("data")
+            .and_then(|d| d.get("user_id"))
+            .and_then(|v| if v.is_number() { Some(v.to_string()) } else { v.as_str().map(|s| s.to_string()) })
+            .unwrap_or_default();
+
+        if user_id.is_empty() || user_id == "0" {
+            return Err(ApiError::Api("Cookie已过期或无效".to_string()));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
+        // Step 2: get user info — user_name, face
+        let info_resp = self
+            .http
+            .get("https://my.115.com/?ct=ajax&ac=nav")
+            .header("Cookie", cookie)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Referer", "https://115.com/")
+            .send()
+            .await?;
 
-        if json.get("state").and_then(|v| v.as_bool()).unwrap_or(false) {
-            let data = json
-                .get("data")
-                .ok_or_else(|| ApiError::Parse("响应中无data字段".to_string()))?;
+        let info_text = info_resp.text().await.map_err(ApiError::Network)?;
+        log::info!("my.115.com/nav: {} bytes, body: {}", info_text.len(), &info_text[..info_text.len().min(500)]);
 
-            // data can be a string (masked phone) or an object with user_id/user_name/face.
-            let (user_id, user_name, face) = if data.is_string() {
-                let phone = data.as_str().unwrap_or("");
-                log::info!("validate_cookie: data is phone string: {}", phone);
-                (phone.to_string(), phone.to_string(), String::new())
-            } else {
-                let uid = data
-                    .get("user_id")
-                    .and_then(|v| if v.is_number() { Some(v.to_string()) } else { v.as_str().map(|s| s.to_string()) })
-                    .unwrap_or_default();
-                let name = data
-                    .get("user_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let face_url = data
-                    .get("face")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                (uid, name, face_url)
-            };
+        let info_json: serde_json::Value = serde_json::from_str(&info_text).unwrap_or_default();
 
-            if user_id.is_empty() || user_id == "0" {
-                log::warn!("validate_cookie: state=true but user_id empty/0, cookie likely expired");
-                return Err(ApiError::Api("Cookie已过期或无效，请重新获取".to_string()));
-            }
+        let user_name = info_json
+            .get("data")
+            .and_then(|d| d.get("user_name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let face = info_json
+            .get("data")
+            .and_then(|d| d.get("face"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
-            Ok(UserInfo115 { user_id, user_name, face })
-        } else {
-            let err = json
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Cookie无效或已过期");
-            Err(ApiError::Api(err.to_string()))
-        }
+        log::info!("validate_cookie success: user_id={}, user_name={}", user_id, user_name);
+
+        Ok(UserInfo115 {
+            user_id,
+            user_name: if user_name.is_empty() { "115用户".to_string() } else { user_name },
+            face,
+        })
     }
 }
