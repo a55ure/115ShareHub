@@ -107,3 +107,21 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
 export async function receiveShareFile(fileId: string, shareLinkId: number, cid: string): Promise<string> {
   return invoke<string>('receive_share_file', { request: { file_id: fileId, share_link_id: shareLinkId, cid } })
 }
+
+// User folders
+export interface UserFolder {
+  cid: string
+  name: string
+}
+
+export async function fetchUserDirectoryTree(cid?: string): Promise<UserFolder[]> {
+  return invoke<UserFolder[]>('fetch_user_directory_tree', { cid: cid || null })
+}
+
+export async function getReceiveTarget(): Promise<string> {
+  return invoke<string>('get_receive_target')
+}
+
+export async function setReceiveTarget(cid: string, name: string): Promise<void> {
+  return invoke('set_receive_target', { cid, name })
+}

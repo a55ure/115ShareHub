@@ -395,4 +395,88 @@ impl Pan115Client {
         log::info!("receive success for file_id={}", file_id);
         Ok(())
     }
+
+    /// List the logged-in user's own folders (for choosing a destination).
+    /// Calls GET https://webapi.115.com/files?aid=1&cid={cid}&show_dir=1&format=json
+    pub async fn fetch_user_folders(
+        &self,
+        cid: &str,
+    ) -> Result<Vec<UserFolder>, ApiError> {
+        let url = format!(
+            "https://webapi.115.com/files?aid=1&cid={}&limit=1150&offset=0&show_dir=1&format=json",
+            cid
+        );
+
+        let mut req = self
+            .proxy_pool
+            .active_client()
+            .get(&url)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .header("Referer", "https://115.com/");
+
+        if let Some(ref cookie) = self.cookie {
+            req = req.header("Cookie", cookie);
+        }
+
+        // Rate limit
+        {
+            let mut last = self.last_request.lock().await;
+            let delay_ms = rand::thread_rng().gen_range(self.min_interval_ms..=self.max_interval_ms);
+            let delay = Duration::from_millis(delay_ms);
+            let elapsed = last.elapsed();
+            if elapsed < delay {
+                tokio::time::sleep(delay - elapsed).await;
+            }
+            *last = std::time::Instant::now();
+        }
+
+        let resp = req.send().await?;
+        let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("fetch_user_folders cid={}: {} bytes", cid, text.len());
+
+        if text.trim().starts_with('<') {
+            return Err(ApiError::Api("获取目录被115拦截".to_string()));
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
+
+        if !json.get("state").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            return Err(ApiError::Api(format!("获取目录失败: {}", err)));
+        }
+
+        let folders: Vec<UserFolder> = json
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|f| {
+                        let is_dir = f.get("fc").and_then(|v| v.as_str()).map(|s| s == "0").unwrap_or(false)
+                            || f.get("fid").is_none()
+                            || f.get("fid").and_then(|v| v.as_str()).map(|s| s == "0").unwrap_or(false);
+                        if !is_dir { return None; }
+                        let cid = f.get("cid")
+                            .and_then(|v| v.as_str().or_else(|| v.as_i64().map(|_| "")))
+                            .unwrap_or("0");
+                        if cid.is_empty() || cid == "0" { return None; }
+                        Some(UserFolder {
+                            cid: cid.to_string(),
+                            name: f.get("n").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(folders)
+    }
+}
+
+/// A folder in the user's 115 cloud.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserFolder {
+    pub cid: String,
+    pub name: String,
 }

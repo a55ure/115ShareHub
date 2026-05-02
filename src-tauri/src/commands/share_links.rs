@@ -5,7 +5,7 @@ use crate::pan115::parser::ShareLinkParser;
 use tauri::{AppHandle, Emitter, State};
 use url::Url;
 
-fn get_proxy_configs_from_db(db: &Database) -> Vec<crate::pan115::client::ProxyConfig> {
+pub(crate) fn get_proxy_configs_from_db(db: &Database) -> Vec<crate::pan115::client::ProxyConfig> {
     let config_str = db
         .get_setting("proxy_configs")
         .ok()
@@ -280,6 +280,12 @@ pub async fn receive_share_file(
         return Err("请先登录115账号".to_string());
     }
 
+    let target_cid = state
+        .get_setting("receive_target_cid")
+        .map_err(|e| e.to_string())?
+        .filter(|v| !v.is_empty() && v != "0")
+        .unwrap_or_else(|| "0".to_string());
+
     let proxy_configs = get_proxy_configs_from_db(&state);
     let client = Pan115Client::with_proxy_pool(1, &proxy_configs).with_cookie(Some(cookie));
 
@@ -289,10 +295,15 @@ pub async fn receive_share_file(
             &share_link.receive_code,
             &request.file_id,
             &request.cid,
-            "0", // target: user root folder
+            &target_cid,
         )
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(format!("已保存到115网盘根目录"))
+    let target_name = state
+        .get_setting("receive_target_name")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "根目录".to_string());
+    Ok(format!("已保存到: {}", target_name))
 }

@@ -1,6 +1,6 @@
 use crate::db::Database;
 use crate::pan115::auth::{AuthClient, LoginStatus};
-use crate::pan115::client::ProxyConfig;
+use crate::pan115::client::{Pan115Client, ProxyConfig, UserFolder};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -211,5 +211,41 @@ fn clear_auth_settings(db: &Database) -> Result<(), String> {
     let conn = db.get_conn();
     conn.execute("DELETE FROM settings WHERE key LIKE 'auth_%'", [])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Fetch the user's directory tree for choosing a receive destination.
+#[tauri::command]
+pub async fn fetch_user_directory_tree(
+    state: State<'_, Database>,
+    cid: Option<String>,
+) -> Result<Vec<UserFolder>, String> {
+    let cookie = state
+        .get_setting("auth_cookie")
+        .map_err(|e| e.to_string())?
+        .ok_or("请先登录115账号".to_string())?;
+
+    let proxy_configs = crate::commands::share_links::get_proxy_configs_from_db(&state);
+    let client = Pan115Client::with_proxy_pool(1, &proxy_configs).with_cookie(Some(cookie));
+
+    client
+        .fetch_user_folders(&cid.unwrap_or_else(|| "0".to_string()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get/set the receive target folder CID.
+#[tauri::command]
+pub fn get_receive_target(state: State<'_, Database>) -> Result<String, String> {
+    state
+        .get_setting("receive_target_cid")
+        .map_err(|e| e.to_string())
+        .map(|v| v.unwrap_or_else(|| "0".to_string()))
+}
+
+#[tauri::command]
+pub fn set_receive_target(state: State<'_, Database>, cid: String, name: String) -> Result<(), String> {
+    state.set_setting("receive_target_cid", &cid).map_err(|e| e.to_string())?;
+    state.set_setting("receive_target_name", &name).map_err(|e| e.to_string())?;
     Ok(())
 }
