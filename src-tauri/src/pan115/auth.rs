@@ -197,7 +197,7 @@ impl AuthClient {
 
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("validate_cookie HTTP {}: {} bytes", status, text.len());
+        log::info!("validate_cookie HTTP {}: {} bytes, body: {}", status, text.len(), &text[..text.len().min(500)]);
 
         if !status.is_success() {
             return Err(ApiError::Api(format!("Cookie验证失败: HTTP {}", status)));
@@ -220,24 +220,28 @@ impl AuthClient {
                 .get("data")
                 .ok_or_else(|| ApiError::Parse("响应中无data字段".to_string()))?;
 
-            Ok(UserInfo115 {
-                user_id: data
-                    .get("user_id")
-                    .and_then(|v| v.as_i64())
-                    .map(|v| v.to_string())
-                    .or_else(|| data.get("user_id").and_then(|v| v.as_str()).map(|s| s.to_string()))
-                    .unwrap_or_default(),
-                user_name: data
-                    .get("user_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                face: data
-                    .get("face")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
+            let user_id = data
+                .get("user_id")
+                .and_then(|v| if v.is_number() { Some(v.to_string()) } else { v.as_str().map(|s| s.to_string()) })
+                .unwrap_or_default();
+            let user_name = data
+                .get("user_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let face = data
+                .get("face")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // If we got state:true but no user_id, the cookie is likely expired/invalid.
+            if user_id.is_empty() || user_id == "0" {
+                log::warn!("validate_cookie: state=true but user_id empty/0, cookie likely expired");
+                return Err(ApiError::Api("Cookie已过期或无效，请重新获取".to_string()));
+            }
+
+            Ok(UserInfo115 { user_id, user_name, face })
         } else {
             let err = json
                 .get("error")
