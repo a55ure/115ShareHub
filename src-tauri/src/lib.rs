@@ -14,6 +14,12 @@ pub fn run() {
             let db_path = app_data_dir.join("115_resource_hub.db");
             let database = db::Database::new(&db_path).expect("failed to open database");
             database.run_migrations().expect("failed to run migrations");
+
+            // Recover links stuck in "parsing" from a previous crash, then start queue
+            commands::share_links::recover_stale_parsing_links(&database);
+            let handle = app.handle().clone();
+            commands::share_links::start_next_pending_link(&database, &handle);
+
             app.manage(database);
             Ok(())
         })
