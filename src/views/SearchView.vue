@@ -7,6 +7,7 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import { useSearchStore } from '../stores/search'
 import { useShareLinksStore } from '../stores/shareLinks'
+import { receiveShareFile, getLoginStatus } from '../utils/tauri'
 import { formatFileSize, FILE_TYPE_OPTIONS, FILE_TYPE_COLOR } from '../utils/format'
 import type { FileEntry } from '../types'
 
@@ -21,6 +22,7 @@ const sizeMax = ref<number | null>(null)
 const selectedShareLinkId = ref<number | null>(null)
 const sortBy = ref<string>('name')
 const sortOrder = ref<string>('asc')
+const loggedIn = ref(false)
 
 const sortOptions = [
   { label: '名称', value: 'name' },
@@ -42,7 +44,24 @@ const sizePresets = [
 
 onMounted(async () => {
   await linksStore.fetchLinks(1)
+  try {
+    const status = await getLoginStatus()
+    loggedIn.value = status.logged_in
+  } catch { /* ignore */ }
 })
+
+async function handleSaveToCloud(row: FileEntry) {
+  if (!loggedIn.value) {
+    message.warning('请先在账号管理页面登录115账号')
+    return
+  }
+  try {
+    const msg = await receiveShareFile(row.file_id, row.share_link_id, row.parent_id || '0')
+    message.success(msg)
+  } catch (e: any) {
+    message.error(`转存失败: ${e}`)
+  }
+}
 
 const linkOptions = computed(() => [
   { label: '全部来源', value: null as any },
@@ -74,6 +93,14 @@ function applySizePreset(preset: typeof sizePresets[0]) {
 }
 
 const columns: DataTableColumns<FileEntry> = [
+  {
+    title: '', key: 'actions', width: 70,
+    render: (row) => h(NButton, {
+      size: 'tiny', type: 'primary', ghost: true,
+      onClick: () => handleSaveToCloud(row),
+      disabled: !loggedIn.value,
+    }, { default: () => '转存' }),
+  },
   {
     title: '文件名', key: 'name', ellipsis: { tooltip: true },
     render: (row) => h('span', { style: { fontWeight: row.is_dir ? 'bold' : 'normal' } }, row.name),

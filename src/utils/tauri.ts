@@ -102,3 +102,8 @@ export async function getAppSettings(): Promise<AppSettings> {
 export async function setAppSetting(key: string, value: string): Promise<void> {
   return invoke('set_app_setting', { key, value })
 }
+
+// Share receive
+export async function receiveShareFile(fileId: string, shareLinkId: number, cid: string): Promise<string> {
+  return invoke<string>('receive_share_file', { request: { file_id: fileId, share_link_id: shareLinkId, cid } })
+}

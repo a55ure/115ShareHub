@@ -322,4 +322,77 @@ impl Pan115Client {
             }
         }
     }
+
+    /// Save a shared file to the logged-in user's 115 cloud.
+    /// Calls POST https://webapi.115.com/share/receive
+    pub async fn receive_share_file(
+        &self,
+        share_code: &str,
+        receive_code: &str,
+        file_id: &str,
+        cid: &str,
+        to_cid: &str,
+    ) -> Result<(), ApiError> {
+        let referer = format!(
+            "https://115cdn.com/s/{}?password={}&",
+            share_code, receive_code
+        );
+        let url = "https://webapi.115.com/share/receive";
+        let form = [
+            ("share_code", share_code),
+            ("receive_code", receive_code),
+            ("file_id", file_id),
+            ("cid", cid),
+            ("to_cid", to_cid),
+        ];
+
+        let mut req = self
+            .proxy_pool
+            .active_client()
+            .post(url)
+            .form(&form)
+            .header("Referer", &referer)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+
+        if let Some(ref cookie) = self.cookie {
+            req = req.header("Cookie", cookie);
+        }
+
+        {
+            let mut last = self.last_request.lock().await;
+            let delay_ms = rand::thread_rng().gen_range(self.min_interval_ms..=self.max_interval_ms);
+            let delay = Duration::from_millis(delay_ms);
+            let elapsed = last.elapsed();
+            if elapsed < delay {
+                tokio::time::sleep(delay - elapsed).await;
+            }
+            *last = std::time::Instant::now();
+        }
+
+        let resp = req.send().await?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("receive HTTP {}: {} bytes, body: {}", status, text.len(), &text[..text.len().min(300)]);
+
+        if !status.is_success() || text.trim().starts_with('<') {
+            return Err(ApiError::Api(format!("转存失败: HTTP {} / WAF拦截", status)));
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
+
+        let state_ok = json
+            .get("state")
+            .and_then(|v| v.as_bool())
+            .or_else(|| json.get("state").and_then(|v| v.as_i64()).map(|n| n == 0))
+            .unwrap_or(false);
+
+        if !state_ok {
+            let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            return Err(ApiError::Api(format!("转存失败: {}", err)));
+        }
+        log::info!("receive success for file_id={}", file_id);
+        Ok(())
+    }
 }

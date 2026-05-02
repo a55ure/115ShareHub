@@ -2,16 +2,18 @@
 import { ref, h, onMounted, computed } from 'vue'
 import {
   NGrid, NGi, NStatistic, NCard, NSpin, NTag, NDataTable, NSpace, NSelect, NInput,
+  NButton, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useAppStore } from '../stores/app'
 import { useShareLinksStore } from '../stores/shareLinks'
 import { formatFileSize, FILE_TYPE_COLOR } from '../utils/format'
-import { listFiles } from '../utils/tauri'
+import { listFiles, receiveShareFile, getLoginStatus } from '../utils/tauri'
 import type { FileEntry, PaginatedResult } from '../types'
 
 const appStore = useAppStore()
 const linksStore = useShareLinksStore()
+const message = useMessage()
 
 const files = ref<FileEntry[]>([])
 const total = ref(0)
@@ -20,6 +22,7 @@ const currentPage = ref(1)
 const pageSize = ref(50)
 const fileTypeFilter = ref<string | null>(null)
 const keyword = ref('')
+const loggedIn = ref(false)
 
 const typeOptions = [
   { label: '全部', value: '' },
@@ -57,7 +60,24 @@ onMounted(async () => {
     linksStore.fetchLinks(1),
     fetchFiles(1),
   ])
+  try {
+    const status = await getLoginStatus()
+    loggedIn.value = status.logged_in
+  } catch { /* ignore */ }
 })
+
+async function handleSaveToCloud(row: FileEntry) {
+  if (!loggedIn.value) {
+    message.warning('请先在账号管理页面登录115账号')
+    return
+  }
+  try {
+    const msg = await receiveShareFile(row.file_id, row.share_link_id, row.parent_id || '0')
+    message.success(msg)
+  } catch (e: any) {
+    message.error(`转存失败: ${e}`)
+  }
+}
 
 function handlePageChange(p: number) {
   fetchFiles(p)
@@ -76,6 +96,14 @@ const linkMap = computed(() => {
 })
 
 const columns: DataTableColumns<FileEntry> = [
+  {
+    title: '', key: 'actions', width: 70,
+    render: (row) => row.is_dir ? null : h(NButton, {
+      size: 'tiny', type: 'primary', ghost: true,
+      onClick: () => handleSaveToCloud(row),
+      disabled: !loggedIn.value,
+    }, { default: () => '转存' }),
+  },
   {
     title: '文件名', key: 'name', minWidth: 300,
     render: (row) => h('span', { style: { fontWeight: 500 } }, row.name),

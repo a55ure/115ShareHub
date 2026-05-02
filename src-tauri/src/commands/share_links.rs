@@ -252,3 +252,47 @@ pub async fn get_share_link_detail(
         top_level_dirs: vec![],
     })
 }
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReceiveFileRequest {
+    pub file_id: String,
+    pub share_link_id: i64,
+    pub cid: String,
+}
+
+#[tauri::command]
+pub async fn receive_share_file(
+    state: State<'_, Database>,
+    request: ReceiveFileRequest,
+) -> Result<String, String> {
+    // Get share_link info for share_code / receive_code
+    let share_link = state
+        .get_share_link(request.share_link_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("分享链接不存在".to_string())?;
+
+    let cookie = state
+        .get_setting("auth_cookie")
+        .map_err(|e| e.to_string())?
+        .ok_or("请先登录115账号".to_string())?;
+
+    if cookie.is_empty() {
+        return Err("请先登录115账号".to_string());
+    }
+
+    let proxy_configs = get_proxy_configs_from_db(&state);
+    let client = Pan115Client::with_proxy_pool(1, &proxy_configs).with_cookie(Some(cookie));
+
+    client
+        .receive_share_file(
+            &share_link.share_code,
+            &share_link.receive_code,
+            &request.file_id,
+            &request.cid,
+            "0", // target: user root folder
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!("已保存到115网盘根目录"))
+}
