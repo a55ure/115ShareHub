@@ -11,6 +11,8 @@ import type {
   LoginStatus,
   QrCodeResponse,
   PollResponse,
+  ProxyConfig,
+  AppSettings,
 } from '../types'
 
 export async function addShareLink(request: AddShareLinkRequest): Promise<ShareLink> {
@@ -60,8 +62,8 @@ export async function initQrcodeLogin(): Promise<QrCodeResponse> {
   return invoke<QrCodeResponse>('init_qrcode_login')
 }
 
-export async function pollQrcodeLogin(uid: string): Promise<PollResponse> {
-  return invoke<PollResponse>('poll_qrcode_login', { uid })
+export async function pollQrcodeLogin(token: string): Promise<PollResponse> {
+  return invoke<PollResponse>('poll_qrcode_login', { token })
 }
 
 export async function loginByCookie(cookie: string): Promise<LoginStatus> {
@@ -74,4 +76,29 @@ export async function getLoginStatus(): Promise<LoginStatus> {
 
 export async function logout(): Promise<void> {
   return invoke('logout')
+}
+
+// Settings
+export async function getProxyConfig(): Promise<ProxyConfig> {
+  return invoke<ProxyConfig>('get_proxy_config')
+}
+
+export async function saveProxyConfig(config: ProxyConfig): Promise<void> {
+  return invoke('save_proxy_config', { config })
+}
+
+export async function getProxyConfigs(): Promise<ProxyConfig[]> {
+  return invoke<ProxyConfig[]>('get_proxy_configs')
+}
+
+export async function saveProxyConfigs(configs: ProxyConfig[]): Promise<void> {
+  return invoke('save_proxy_configs', { configs })
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>('get_app_settings')
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  return invoke('set_app_setting', { key, value })
 }

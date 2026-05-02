@@ -60,7 +60,7 @@ impl ShareLinkParser {
         db: &Database,
     ) -> Result<ParseResult, ApiError> {
         let first = self.client
-            .fetch_share_snap(share_code, receive_code, "0", self.page_size, 0)
+            .fetch_share_snap_with_backoff(share_code, receive_code, "0", self.page_size, 0, 3)
             .await?;
 
         let data = first.data.ok_or_else(|| {
@@ -141,7 +141,7 @@ impl ShareLinkParser {
         let mut all_items = Vec::new();
         let mut offset: u32 = 0;
         loop {
-            let resp = self.client.fetch_share_snap(share_code, receive_code, cid, self.page_size, offset).await?;
+            let resp = self.client.fetch_share_snap_with_backoff(share_code, receive_code, cid, self.page_size, offset, 3).await?;
             let data = match resp.data { Some(d) => d, None => break };
             let count = data.list.len() as u32;
             all_items.extend(data.list);

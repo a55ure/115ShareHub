@@ -1,9 +1,55 @@
 use crate::db::models::*;
 use crate::db::Database;
-use crate::pan115::client::Pan115Client;
+use crate::pan115::client::{Pan115Client, ProxyConfig};
 use crate::pan115::parser::ShareLinkParser;
 use tauri::{AppHandle, Emitter, State};
 use url::Url;
+
+fn get_proxy_configs_from_db(db: &Database) -> Vec<crate::pan115::client::ProxyConfig> {
+    let config_str = db
+        .get_setting("proxy_configs")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    if config_str.is_empty() {
+        // Fall back to old single-proxy format
+        return get_single_proxy_config_from_db(db)
+            .into_iter()
+            .filter(|c| c.enabled && !c.host.is_empty())
+            .collect();
+    }
+
+    serde_json::from_str(&config_str).unwrap_or_default()
+}
+
+fn get_single_proxy_config_from_db(db: &Database) -> Vec<crate::pan115::client::ProxyConfig> {
+    let config_str = db
+        .get_setting("proxy_config")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if config_str.is_empty() {
+        return vec![];
+    }
+    serde_json::from_str::<crate::pan115::client::ProxyConfig>(&config_str)
+        .map(|c| vec![c])
+        .unwrap_or_default()
+}
+
+fn get_rate_limit_from_db(db: &Database) -> u32 {
+    db.get_setting("rate_limit_rps")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2)
+        .clamp(1, 10)
+}
+
+fn get_auth_cookie_from_db(db: &Database) -> Option<String> {
+    db.get_setting("auth_cookie").ok().flatten()
+        .and_then(|c| if c.is_empty() { None } else { Some(c) })
+}
 
 fn extract_share_code(input: &str) -> Option<String> {
     if input.starts_with("http") {
@@ -48,7 +94,10 @@ pub async fn add_share_link(
     let receive_code_clone = request.receive_code.clone();
 
     tokio::spawn(async move {
-        let client = Pan115Client::new(2);
+        let proxy_configs = get_proxy_configs_from_db(&db);
+        let rate = get_rate_limit_from_db(&db);
+        let cookie = get_auth_cookie_from_db(&db);
+        let client = Pan115Client::with_proxy_pool(rate, &proxy_configs).with_cookie(cookie);
         let parser = ShareLinkParser::new(client, 1150);
 
         db.update_share_link_status(id, "parsing", None).ok();
@@ -126,7 +175,10 @@ pub async fn refresh_share_link(
     let receive_code = share_link.receive_code.clone();
 
     tokio::spawn(async move {
-        let client = Pan115Client::new(2);
+        let proxy_configs = get_proxy_configs_from_db(&db);
+        let rate = get_rate_limit_from_db(&db);
+        let cookie = get_auth_cookie_from_db(&db);
+        let client = Pan115Client::with_proxy_pool(rate, &proxy_configs).with_cookie(cookie);
         let parser = ShareLinkParser::new(client, 1150);
 
         db.update_share_link_status(id, "parsing", None).ok();

@@ -32,6 +32,12 @@ pub fn run() {
             commands::auth::login_by_cookie,
             commands::auth::get_login_status,
             commands::auth::logout,
+            commands::settings::get_proxy_config,
+            commands::settings::save_proxy_config,
+            commands::settings::get_proxy_configs,
+            commands::settings::save_proxy_configs,
+            commands::settings::set_app_setting,
+            commands::settings::get_app_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

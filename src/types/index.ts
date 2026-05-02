@@ -93,3 +93,20 @@ export interface PollResponse {
   status: number
   logged_in: boolean
 }
+
+export interface ProxyConfig {
+  enabled: boolean
+  proxyType: 'http' | 'https' | 'socks5'
+  host: string
+  port: number
+  username?: string
+  password?: string
+}
+
+export interface AppSettings {
+  rate_limit_rps: number
+  page_size: number
+  theme: string
+  language: string
+  proxy: ProxyConfig
+}
