@@ -8,26 +8,35 @@ fn get_proxy_config(db: &Database) -> ProxyConfig {
     // Try new multi-proxy format first
     if let Ok(Some(configs_str)) = db.get_setting("proxy_configs") {
         if !configs_str.is_empty() {
-            if let Ok(configs) = serde_json::from_str::<Vec<ProxyConfig>>(&configs_str) {
-                if let Some(cfg) = configs.into_iter().find(|c| c.enabled && !c.host.is_empty()) {
-                    log::info!("AuthClient using proxy from proxy_configs: {}:{}", cfg.host, cfg.port);
-                    return cfg;
+            log::info!("AuthClient: proxy_configs raw: {}", &configs_str[..configs_str.len().min(200)]);
+            match serde_json::from_str::<Vec<ProxyConfig>>(&configs_str) {
+                Ok(configs) => {
+                    if let Some(cfg) = configs.into_iter().find(|c| c.enabled && !c.host.is_empty()) {
+                        log::info!("AuthClient: using proxy {}:{} ({})", cfg.host, cfg.port, cfg.proxy_type);
+                        return cfg;
+                    }
+                    log::warn!("AuthClient: proxy_configs found but no enabled proxy with host");
                 }
+                Err(e) => log::warn!("AuthClient: failed to parse proxy_configs: {}", e),
             }
         }
     }
     // Fall back to old single-proxy format
     if let Ok(Some(config_str)) = db.get_setting("proxy_config") {
         if !config_str.is_empty() {
-            if let Ok(cfg) = serde_json::from_str::<ProxyConfig>(&config_str) {
-                if cfg.enabled && !cfg.host.is_empty() {
-                    log::info!("AuthClient using proxy from proxy_config: {}:{}", cfg.host, cfg.port);
-                    return cfg;
+            log::info!("AuthClient: proxy_config raw: {}", &config_str[..config_str.len().min(200)]);
+            match serde_json::from_str::<ProxyConfig>(&config_str) {
+                Ok(cfg) => {
+                    if cfg.enabled && !cfg.host.is_empty() {
+                        log::info!("AuthClient: using proxy (legacy) {}:{} ({})", cfg.host, cfg.port, cfg.proxy_type);
+                        return cfg;
+                    }
                 }
+                Err(e) => log::warn!("AuthClient: failed to parse proxy_config: {}", e),
             }
         }
     }
-    log::info!("AuthClient: no proxy configured, using direct connection");
+    log::warn!("AuthClient: NO proxy configured, using direct connection (likely blocked)");
     ProxyConfig::default()
 }
 
