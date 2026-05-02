@@ -324,76 +324,105 @@ impl Pan115Client {
     }
 
     /// Save a shared file to the logged-in user's 115 cloud.
-    /// Calls POST https://webapi.115.com/share/receive
+    /// Step 1: POST /share/receive (always goes to root).
+    /// Step 2: POST /files/move to target_cid if not root.
     pub async fn receive_share_file(
         &self,
         share_code: &str,
         receive_code: &str,
         file_id: &str,
         cid: &str,
-        to_cid: &str,
+        target_cid: &str,
     ) -> Result<(), ApiError> {
         let referer = format!(
             "https://115cdn.com/s/{}?password={}&",
             share_code, receive_code
         );
-        let url = "https://webapi.115.com/share/receive";
+
+        // Step 1: receive to root
         let form = [
             ("share_code", share_code),
             ("receive_code", receive_code),
             ("file_id", file_id),
             ("cid", cid),
-            ("pid", to_cid),
         ];
-
         let mut req = self
-            .proxy_pool
-            .active_client()
-            .post(url)
+            .proxy_pool.active_client()
+            .post("https://webapi.115.com/share/receive")
             .form(&form)
             .header("Referer", &referer)
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-
         if let Some(ref cookie) = self.cookie {
             req = req.header("Cookie", cookie);
         }
-
-        {
-            let mut last = self.last_request.lock().await;
-            let delay_ms = rand::thread_rng().gen_range(self.min_interval_ms..=self.max_interval_ms);
-            let delay = Duration::from_millis(delay_ms);
-            let elapsed = last.elapsed();
-            if elapsed < delay {
-                tokio::time::sleep(delay - elapsed).await;
-            }
-            *last = std::time::Instant::now();
-        }
-
+        self.rate_limit_wait().await;
         let resp = req.send().await?;
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("receive HTTP {}: {} bytes, body: {}", status, text.len(), &text[..text.len().min(300)]);
+        log::info!("receive HTTP {}: {} bytes", status, text.len());
 
         if !status.is_success() || text.trim().starts_with('<') {
-            return Err(ApiError::Api(format!("转存失败: HTTP {} / WAF拦截", status)));
+            return Err(ApiError::Api("转存接收失败".to_string()));
         }
-
         let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
-
-        let state_ok = json
-            .get("state")
-            .and_then(|v| v.as_bool())
-            .or_else(|| json.get("state").and_then(|v| v.as_i64()).map(|n| n == 0))
-            .unwrap_or(false);
-
+            serde_json::from_str(&text).map_err(|_| ApiError::Parse("转存响应解析失败".to_string()))?;
+        let state_ok = json.get("state").and_then(|v| v.as_bool()).unwrap_or(false);
         if !state_ok {
             let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("未知错误");
-            return Err(ApiError::Api(format!("转存失败: {}", err)));
+            return Err(ApiError::Api(format!("转存接收失败: {}", err)));
         }
-        log::info!("receive success for file_id={}", file_id);
+
+        // Extract received file's new fid
+        let new_fid = json
+            .get("data")
+            .and_then(|d| d.get("file_id").or_else(|| d.get("fid")))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .or_else(|| {
+                json.get("data").and_then(|d| d.get("pick_code").or_else(|| d.get("pc")))
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+            .unwrap_or_default();
+        log::info!("receive: new_fid={}, target_cid={}", new_fid, target_cid);
+
+        // Step 2: move to target if not root
+        if target_cid != "0" && !target_cid.is_empty() && !new_fid.is_empty() {
+            let move_form = [
+                ("fid[0]", new_fid.as_str()),
+                ("pid", target_cid),
+            ];
+            self.rate_limit_wait().await;
+            let mut mv_req = self
+                .proxy_pool.active_client()
+                .post("https://webapi.115.com/files/move")
+                .form(&move_form)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Referer", "https://115.com/");
+            if let Some(ref cookie) = self.cookie {
+                mv_req = mv_req.header("Cookie", cookie);
+            }
+            let mv_resp = mv_req.send().await?;
+            let mv_status = mv_resp.status();
+            let mv_text = mv_resp.text().await.map_err(ApiError::Network)?;
+            log::info!("move HTTP {}: {} bytes", mv_status, mv_text.len());
+            let mv_json: serde_json::Value =
+                serde_json::from_str(&mv_text).map_err(|_| ApiError::Parse("移动响应解析失败".to_string()))?;
+            if !mv_json.get("state").and_then(|v| v.as_bool()).unwrap_or(false) {
+                log::warn!("move failed, file left in root: {}", mv_text);
+            }
+        }
         Ok(())
+    }
+
+    async fn rate_limit_wait(&self) {
+        let mut last = self.last_request.lock().await;
+        let delay_ms = rand::thread_rng().gen_range(self.min_interval_ms..=self.max_interval_ms);
+        let delay = Duration::from_millis(delay_ms);
+        let elapsed = last.elapsed();
+        if elapsed < delay {
+            tokio::time::sleep(delay - elapsed).await;
+        }
+        *last = std::time::Instant::now();
     }
 
     /// List the logged-in user's own folders (for choosing a destination).
