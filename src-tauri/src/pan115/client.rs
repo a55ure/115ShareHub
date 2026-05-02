@@ -343,7 +343,7 @@ impl Pan115Client {
             ("receive_code", receive_code),
             ("file_id", file_id),
             ("cid", cid),
-            ("to_cid", to_cid),
+            ("pid", to_cid),
         ];
 
         let mut req = self
@@ -457,9 +457,13 @@ impl Pan115Client {
                             || f.get("fid").is_none()
                             || f.get("fid").and_then(|v| v.as_str()).map(|s| s == "0").unwrap_or(false);
                         if !is_dir { return None; }
-                        let cid = f.get("cid")
-                            .and_then(|v| v.as_str().or_else(|| v.as_i64().map(|_| "")))
-                            .unwrap_or("0");
+                        let cid = if let Some(s) = f.get("cid").and_then(|v| v.as_str()) {
+                            s.to_string()
+                        } else if let Some(n) = f.get("cid").and_then(|v| v.as_i64()) {
+                            n.to_string()
+                        } else {
+                            String::new()
+                        };
                         if cid.is_empty() || cid == "0" { return None; }
                         Some(UserFolder {
                             cid: cid.to_string(),

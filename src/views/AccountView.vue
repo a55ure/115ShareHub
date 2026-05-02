@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import {
   NCard, NTabs, NTabPane, NButton, NInput, NForm, NFormItem, NSpace,
   NAvatar, NDescriptions, NDescriptionsItem, NPopconfirm, NAlert,
-  NSpin, NSelect, NBreadcrumb, NBreadcrumbItem, useMessage,
+  NSpin, useMessage,
 } from 'naive-ui'
 import QrcodeVue from 'qrcode.vue'
 import type { LoginStatus } from '../types'
@@ -11,7 +11,7 @@ import {
   initQrcodeLogin, pollQrcodeLogin, loginByCookie, getLoginStatus, logout,
   fetchUserDirectoryTree, getReceiveTarget, setReceiveTarget,
 } from '../utils/tauri'
-import type { UserFolder } from '../utils/tauri'
+import FolderTreeNode from '../components/FolderTreeNode.vue'
 
 const message = useMessage()
 const loginStatus = ref<LoginStatus | null>(null)
@@ -30,11 +30,18 @@ const cookieInput = ref('')
 const cookieLoading = ref(false)
 
 // Folder selector state
-const folders = ref<UserFolder[]>([])
-const folderLoading = ref(false)
-const folderStack = ref<{ cid: string; name: string }[]>([{ cid: '0', name: '根目录' }])
+interface FolderNode {
+  cid: string
+  name: string
+  children: FolderNode[]
+  expanded: boolean
+  loading: boolean
+  loaded: boolean
+}
+
+const rootFolder = ref<FolderNode>({ cid: '0', name: '根目录', children: [], expanded: true, loading: false, loaded: false })
 const targetCid = ref('0')
-const targetName = ref('')
+const targetName = ref('根目录')
 
 const loggedIn = computed(() => loginStatus.value?.logged_in ?? false)
 
@@ -42,7 +49,7 @@ onMounted(async () => {
   try {
     loginStatus.value = await getLoginStatus()
     if (loginStatus.value?.logged_in) {
-      await loadFolders('0')
+      await expandNode(rootFolder.value)
       await loadTarget()
     }
   } catch (e: any) {
@@ -52,40 +59,46 @@ onMounted(async () => {
   }
 })
 
-async function loadFolders(cid: string) {
-  folderLoading.value = true
+async function expandNode(node: FolderNode) {
+  if (node.loaded) {
+    node.expanded = !node.expanded
+    return
+  }
+  node.loading = true
   try {
-    folders.value = await fetchUserDirectoryTree(cid)
+    const items = await fetchUserDirectoryTree(node.cid)
+    node.children = items.map(f => ({
+      cid: f.cid,
+      name: f.name,
+      children: [],
+      expanded: false,
+      loading: false,
+      loaded: false,
+    }))
+    node.loaded = true
+    node.expanded = true
   } catch (e: any) {
     message.error(`获取目录失败: ${e}`)
   } finally {
-    folderLoading.value = false
+    node.loading = false
   }
 }
 
 async function loadTarget() {
   try {
     targetCid.value = await getReceiveTarget()
-    targetName.value = targetCid.value === '0' ? '根目录' : (targetCid.value || '0')
+    if (targetCid.value && targetCid.value !== '0') {
+      targetName.value = targetCid.value
+    }
   } catch { /* ignore */ }
 }
 
-function navigateTo(cid: string, name: string) {
-  folderStack.value.push({ cid, name })
-  loadFolders(cid)
-}
-
-function navigateBack(idx: number) {
-  folderStack.value = folderStack.value.slice(0, idx + 1)
-  loadFolders(folderStack.value[idx].cid)
-}
-
-async function selectTarget(cid: string, name: string) {
-  targetCid.value = cid
-  targetName.value = name
+async function selectTarget(node: FolderNode) {
+  targetCid.value = node.cid
+  targetName.value = node.name
   try {
-    await setReceiveTarget(cid, name)
-    message.success(`转存目标已设为: ${name}`)
+    await setReceiveTarget(node.cid, node.name)
+    message.success(`转存目标已设为: ${node.name}`)
   } catch (e: any) {
     message.error(`保存失败: ${e}`)
   }
@@ -205,36 +218,22 @@ async function handleCookieLogin() {
         </NSpace>
       </NCard>
 
-      <!-- Folder selector for receive target -->
+      <!-- Folder tree for receive target -->
       <NCard v-if="loggedIn" title="转存目标目录" style="margin-top: 16px;">
         <p style="color: #999; margin-bottom: 12px;">选择转存文件保存到的目标目录</p>
-
-        <NSpace vertical :size="8" style="margin-bottom: 12px;">
-          <NBreadcrumb>
-            <NBreadcrumbItem v-for="(item, idx) in folderStack" :key="item.cid"
-              @click="navigateBack(idx)" style="cursor: pointer;">
-              {{ item.name }}
-            </NBreadcrumbItem>
-          </NBreadcrumb>
-        </NSpace>
 
         <NAlert v-if="targetCid !== '0'" type="success" :bordered="false" style="margin-bottom: 12px;">
           当前转存目标: {{ targetName }}
         </NAlert>
 
-        <NSpin :show="folderLoading">
-          <div v-if="folders.length === 0 && !folderLoading" style="color: #999; padding: 12px 0;">
-            此目录下没有子文件夹
-          </div>
-          <div v-for="f in folders" :key="f.cid" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f0f0f0;">
-            <NButton text @click="navigateTo(f.cid, f.name)" style="text-align: left; flex: 1;">
-              📁 {{ f.name }}
-            </NButton>
-            <NButton size="tiny" @click="selectTarget(f.cid, f.name)" :type="targetCid === f.cid ? 'primary' : 'default'">
-              {{ targetCid === f.cid ? '已选择' : '选择' }}
-            </NButton>
-          </div>
-        </NSpin>
+        <div class="folder-tree">
+          <FolderTreeNode
+            :node="rootFolder"
+            :target-cid="targetCid"
+            @expand="expandNode"
+            @select="selectTarget"
+          />
+        </div>
       </NCard>
 
       <!-- Not logged in state -->
