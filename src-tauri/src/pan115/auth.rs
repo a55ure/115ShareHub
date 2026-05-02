@@ -15,7 +15,6 @@ pub struct PollResult {
     pub cookie: Option<String>,
 }
 
-/// 115 user info returned by /user/info API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo115 {
     pub user_id: String,
@@ -46,11 +45,19 @@ impl AuthClient {
         AuthClient { http }
     }
 
-    /// Step 1: Fetch QR code PNG from 115, return base64 image + uid.
+    /// Step 1: Get uid from 115, then fetch QR code PNG with that uid.
     pub async fn get_qrcode(&self) -> Result<QrCodeResult, ApiError> {
+        // First get the uid
+        let uid = self.fetch_uid().await?;
+        log::info!("Got QR uid: {}", uid);
+
+        // Then fetch the QR image with the uid
         let resp = self
             .http
-            .get("https://qrcodeapi.115.com/api/2.0/pb.png?qrfrom=1&client=0")
+            .get(&format!(
+                "https://qrcodeapi.115.com/api/2.0/pb.png?uid={}&qrfrom=1&client=0",
+                uid
+            ))
             .send()
             .await?;
 
@@ -59,21 +66,6 @@ impl AuthClient {
             return Err(ApiError::Api(format!("获取二维码失败: HTTP {}", status)));
         }
 
-        // Extract uid from Set-Cookie header
-        let uid = resp
-            .headers()
-            .get_all("set-cookie")
-            .iter()
-            .find_map(|v| {
-                let s = v.to_str().ok()?;
-                let prefix = "uid=";
-                let start = s.find(prefix)?;
-                let rest = &s[start + prefix.len()..];
-                let end = rest.find(';').unwrap_or(rest.len());
-                Some(rest[..end].to_string())
-            })
-            .ok_or_else(|| ApiError::Parse("二维码响应中未找到 uid".to_string()))?;
-
         let bytes = resp.bytes().await.map_err(ApiError::Network)?;
         let base64 = base64_encode(&bytes);
 
@@ -81,6 +73,40 @@ impl AuthClient {
             uid,
             qr_image_base64: format!("data:image/png;base64,{}", base64),
         })
+    }
+
+    /// Fetch uid from 115 qrcode API.
+    async fn fetch_uid(&self) -> Result<String, ApiError> {
+        let resp = self
+            .http
+            .get("https://qrcodeapi.115.com/get/uuid")
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(ApiError::Api(format!("获取uuid失败: HTTP {}", status)));
+        }
+
+        let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("UUID response: {}", &text[..text.len().min(500)]);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
+
+        // Try data.uid first, then fall back to other structures
+        let uid = json
+            .get("data")
+            .and_then(|d| d.get("uid"))
+            .or_else(|| json.get("uid"))
+            .and_then(|v| {
+                v.as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| v.as_i64().map(|i| i.to_string()))
+            })
+            .ok_or_else(|| ApiError::Parse(format!("响应中未找到uid: {}", &text[..text.len().min(200)])))?;
+
+        Ok(uid)
     }
 
     /// Step 2: Poll QR code scan status.
@@ -101,21 +127,24 @@ impl AuthClient {
         }
 
         let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("Poll response: {}", &text[..text.len().min(500)]);
+
         let json: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("JSON解析失败: {}", e)))?;
 
-        let data = json
+        let poll_status = json
             .get("data")
-            .ok_or_else(|| ApiError::Parse("响应中无data字段".to_string()))?;
-
-        let poll_status = data
-            .get("status")
+            .and_then(|d| d.get("status"))
+            .or_else(|| json.get("status"))
             .and_then(|v| v.as_i64())
             .unwrap_or(-1) as i32;
 
-        // When status=2 (confirmed), try to extract cookie from response
+        // When status=2 (confirmed), extract cookie from response
         let cookie = if poll_status == 2 {
-            data.get("cookie").and_then(|v| v.as_str()).map(|s| s.to_string())
+            json.get("data")
+                .and_then(|d| d.get("cookie"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
         } else {
             None
         };
@@ -138,7 +167,8 @@ impl AuthClient {
 
         let status = resp.status();
         if !status.is_success() {
-            return Err(ApiError::Api(format!("登录交换失败: HTTP {}", status)));
+            let text = resp.text().await.unwrap_or_default();
+            return Err(ApiError::Api(format!("登录交换失败: HTTP {} - {}", status, &text[..text.len().min(200)])));
         }
 
         // Extract cookies from response headers
@@ -153,20 +183,22 @@ impl AuthClient {
             })
             .collect();
 
-        if cookies.is_empty() {
-            // Fallback: try to parse JSON body for token/cookie
-            let text = resp.text().await.map_err(ApiError::Network)?;
-            let json: serde_json::Value =
-                serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("{}", e)))?;
-
-            json.get("data")
-                .and_then(|d| d.get("cookie"))
-                .and_then(|c| c.as_str())
-                .map(|s| s.to_string())
-                .ok_or_else(|| ApiError::Parse("登录响应中未找到cookie".to_string()))
-        } else {
-            Ok(cookies.join("; "))
+        if !cookies.is_empty() {
+            return Ok(cookies.join("; "));
         }
+
+        // Fallback: try JSON body for cookie
+        let text = resp.text().await.map_err(ApiError::Network)?;
+        log::info!("Exchange response: {}", &text[..text.len().min(500)]);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ApiError::Parse(format!("{}", e)))?;
+
+        json.get("data")
+            .and_then(|d| d.get("cookie"))
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| ApiError::Parse("登录响应中未找到cookie".to_string()))
     }
 
     /// Validate a cookie string by fetching user info from 115.
