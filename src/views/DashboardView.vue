@@ -2,7 +2,7 @@
 import { ref, h, onMounted, computed } from 'vue'
 import {
   NGrid, NGi, NStatistic, NCard, NSpin, NTag, NDataTable, NSpace, NSelect, NInput,
-  NButton, useMessage,
+  NButton, NPagination, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useAppStore } from '../stores/app'
@@ -19,7 +19,7 @@ const files = ref<FileEntry[]>([])
 const total = ref(0)
 const loading = ref(false)
 const currentPage = ref(1)
-const pageSize = ref(50)
+const pageSize = ref(10)
 const fileTypeFilter = ref<string | null>(null)
 const keyword = ref('')
 const loggedIn = ref(false)
@@ -81,6 +81,11 @@ async function handleSaveToCloud(row: FileEntry) {
 
 function handlePageChange(p: number) {
   fetchFiles(p)
+}
+
+function handlePageSizeChange(ps: number) {
+  pageSize.value = ps
+  fetchFiles(1)
 }
 
 function handleFilter() {
@@ -175,15 +180,20 @@ const columns: DataTableColumns<FileEntry> = [
         <NDataTable
           :columns="columns"
           :data="files"
-          :pagination="{
-            page: currentPage,
-            pageSize: pageSize,
-            itemCount: total,
-            onChange: handlePageChange,
-          }"
           :bordered="false"
           :scroll-x="900"
         />
+        <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+          <NPagination
+            :page="currentPage"
+            :page-size="pageSize"
+            :item-count="total"
+            :page-sizes="[10, 20, 50, 100]"
+            show-size-picker
+            @update:page="handlePageChange"
+            @update:page-size="handlePageSizeChange"
+          />
+        </div>
         <div v-if="files.length === 0 && !loading" style="text-align: center; color: #999; padding: 40px;">
           暂无文件数据，请先添加分享链接
         </div>

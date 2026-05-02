@@ -8,7 +8,7 @@ export const useSearchStore = defineStore('search', () => {
   const totalCount = ref(0)
   const loading = ref(false)
   const currentPage = ref(1)
-  const pageSize = ref(50)
+  const pageSize = ref(10)
   const currentParams = ref<SearchParams>({})
 
   async function doSearch(params: SearchParams) {

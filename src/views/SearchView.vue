@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, h } from 'vue'
 import {
   NInput, NDataTable, NSpace, NSelect, NButton, NGrid, NGi, NFormItem,
-  NInputGroup, NTag, NInputNumber, NCollapse, NCollapseItem, NSpin, useMessage,
+  NInputGroup, NTag, NInputNumber, NCollapse, NCollapseItem, NSpin, NPagination, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useSearchStore } from '../stores/search'
@@ -80,11 +80,20 @@ async function doSearch(page = 1) {
       sort_by: sortBy.value as any,
       sort_order: sortOrder.value as any,
       page,
-      page_size: 50,
+      page_size: searchStore.pageSize,
     })
   } catch (e: any) {
     message.error(`搜索失败: ${e}`)
   }
+}
+
+function handleSearchPageChange(p: number) {
+  doSearch(p)
+}
+
+function handleSearchPageSizeChange(ps: number) {
+  searchStore.pageSize = ps
+  doSearch(1)
 }
 
 function applySizePreset(preset: typeof sizePresets[0]) {
@@ -177,14 +186,19 @@ const columns: DataTableColumns<FileEntry> = [
       <NDataTable
         :columns="columns"
         :data="searchStore.results"
-        :pagination="{
-          page: searchStore.currentPage,
-          pageSize: searchStore.pageSize,
-          itemCount: searchStore.totalCount,
-          onChange: (p: number) => doSearch(p),
-        }"
         :bordered="false"
       />
+      <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <NPagination
+          :page="searchStore.currentPage"
+          :page-size="searchStore.pageSize"
+          :item-count="searchStore.totalCount"
+          :page-sizes="[10, 20, 50, 100]"
+          show-size-picker
+          @update:page="handleSearchPageChange"
+          @update:page-size="handleSearchPageSizeChange"
+        />
+      </div>
       <div v-if="searchStore.results.length === 0 && !searchStore.loading" style="text-align: center; color: #999; padding: 40px;">
         输入关键词开始搜索
       </div>

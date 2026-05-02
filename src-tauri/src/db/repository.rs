@@ -157,7 +157,7 @@ impl Database {
     pub fn search_files(&self, params: &SearchParams) -> Result<SearchResult, rusqlite::Error> {
         let conn = self.get_conn();
         let page = params.page.unwrap_or(1).max(1);
-        let page_size = params.page_size.unwrap_or(50).min(200);
+        let page_size = params.page_size.unwrap_or(10).min(200);
         let offset = (page - 1) * page_size;
 
         let mut where_clauses = Vec::new();
@@ -345,7 +345,7 @@ impl Database {
     ) -> Result<(Vec<FileEntry>, i64), rusqlite::Error> {
         let conn = self.get_conn();
         let page = params.page.unwrap_or(1).max(1);
-        let page_size = params.page_size.unwrap_or(50).min(200);
+        let page_size = params.page_size.unwrap_or(10).min(200);
         let offset = (page - 1) * page_size;
 
         let mut where_clauses = vec!["f.is_dir = 0".to_string()];

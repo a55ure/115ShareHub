@@ -324,32 +324,38 @@ impl Pan115Client {
     }
 
     /// Save a shared file to the logged-in user's 115 cloud.
-    /// Step 1: POST /share/receive (always goes to root).
-    /// Step 2: POST /files/move to target_cid if not root.
+    /// POST /share/receive — cid parameter IS the target folder (not the share directory).
+    /// When cid is "0" or omitted, the file goes to root.
+    /// Ref: TgtoDrive uses cid=pid to specify destination.
     pub async fn receive_share_file(
         &self,
         share_code: &str,
         receive_code: &str,
         file_id: &str,
-        cid: &str,
-        target_cid: &str,
+        _cid: &str,       // share directory cid — not used in receive API
+        target_cid: &str, // destination folder in user's cloud
     ) -> Result<(), ApiError> {
         let referer = format!(
             "https://115cdn.com/s/{}?password={}&",
             share_code, receive_code
         );
 
-        // Step 1: receive to root
-        let form = [
+        // The /share/receive API uses 'cid' as the target folder.
+        // If target_cid is "0" (root), we can omit cid entirely.
+        let use_target = target_cid != "0" && !target_cid.is_empty();
+        let mut form_vec: Vec<(&str, &str)> = vec![
             ("share_code", share_code),
             ("receive_code", receive_code),
             ("file_id", file_id),
-            ("cid", cid),
         ];
+        if use_target {
+            form_vec.push(("cid", target_cid));
+        }
+
         let mut req = self
             .proxy_pool.active_client()
             .post("https://webapi.115.com/share/receive")
-            .form(&form)
+            .form(&form_vec)
             .header("Referer", &referer)
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
@@ -360,7 +366,7 @@ impl Pan115Client {
         let resp = req.send().await?;
         let status = resp.status();
         let text = resp.text().await.map_err(ApiError::Network)?;
-        log::info!("receive HTTP {}: {} bytes", status, text.len());
+        log::info!("receive HTTP {}: {} bytes, to_cid={}", status, text.len(), if use_target { target_cid } else { "root" });
 
         if !status.is_success() || text.trim().starts_with('<') {
             return Err(ApiError::Api("转存接收失败".to_string()));
@@ -373,44 +379,7 @@ impl Pan115Client {
             return Err(ApiError::Api(format!("转存接收失败: {}", err)));
         }
 
-        // Extract received file's new fid
-        let new_fid = json
-            .get("data")
-            .and_then(|d| d.get("file_id").or_else(|| d.get("fid")))
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .or_else(|| {
-                json.get("data").and_then(|d| d.get("pick_code").or_else(|| d.get("pc")))
-                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-            })
-            .unwrap_or_default();
-        log::info!("receive: new_fid={}, target_cid={}", new_fid, target_cid);
-
-        // Step 2: move to target if not root
-        if target_cid != "0" && !target_cid.is_empty() && !new_fid.is_empty() {
-            let move_form = [
-                ("fid[0]", new_fid.as_str()),
-                ("pid", target_cid),
-            ];
-            self.rate_limit_wait().await;
-            let mut mv_req = self
-                .proxy_pool.active_client()
-                .post("https://webapi.115.com/files/move")
-                .form(&move_form)
-                .header("Accept", "application/json, text/plain, */*")
-                .header("Referer", "https://115.com/");
-            if let Some(ref cookie) = self.cookie {
-                mv_req = mv_req.header("Cookie", cookie);
-            }
-            let mv_resp = mv_req.send().await?;
-            let mv_status = mv_resp.status();
-            let mv_text = mv_resp.text().await.map_err(ApiError::Network)?;
-            log::info!("move HTTP {}: {} bytes", mv_status, mv_text.len());
-            let mv_json: serde_json::Value =
-                serde_json::from_str(&mv_text).map_err(|_| ApiError::Parse("移动响应解析失败".to_string()))?;
-            if !mv_json.get("state").and_then(|v| v.as_bool()).unwrap_or(false) {
-                log::warn!("move failed, file left in root: {}", mv_text);
-            }
-        }
+        log::info!("receive success: file_id={} -> cid={}", file_id, if use_target { target_cid } else { "0 (root)" });
         Ok(())
     }
 

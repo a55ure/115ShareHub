@@ -5,7 +5,7 @@ import {
   NAvatar, NDescriptions, NDescriptionsItem, NPopconfirm, NAlert,
   NSpin, NIcon, useMessage,
 } from 'naive-ui'
-import { ChevronRight, ChevronDown } from '@vicons/ionicons5'
+import { ChevronForward, ChevronDown } from '@vicons/ionicons5'
 import QrcodeVue from 'qrcode.vue'
 import type { LoginStatus } from '../types'
 import {
@@ -201,7 +201,7 @@ async function handleCookieLogin() {
             <NSpin :size="14" v-if="node.loading" />
             <NIcon v-else :size="14">
               <ChevronDown v-if="node.expanded" />
-              <ChevronRight v-else />
+              <ChevronForward v-else />
             </NIcon>
           </span>
           <span class="tree-icon">📁</span>

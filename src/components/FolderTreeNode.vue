@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton, NIcon, NSpin } from 'naive-ui'
-import { ChevronRight, ChevronDown } from '@vicons/ionicons5'
+import { ChevronForward, ChevronDown } from '@vicons/ionicons5'
 
 interface FolderNode {
   cid: string
@@ -37,7 +37,7 @@ const isSelected = () => props.targetCid === props.node.cid
         <NSpin :size="14" v-if="node.loading" />
         <NIcon v-else :size="14">
           <ChevronDown v-if="node.expanded" />
-          <ChevronRight v-else />
+          <ChevronForward v-else />
         </NIcon>
       </span>
       <span class="tree-icon">📁</span>
