@@ -15,10 +15,14 @@ pub fn run() {
             let database = db::Database::new(&db_path).expect("failed to open database");
             database.run_migrations().expect("failed to run migrations");
 
-            // Recover links stuck in "parsing" from a previous crash, then start queue
-            commands::share_links::recover_stale_parsing_links(&database);
+            // Recover links stuck in "parsing" from a previous crash, then start queue.
+            // Must run inside Tauri's async runtime (setup is synchronous).
+            let db = database.clone();
             let handle = app.handle().clone();
-            commands::share_links::start_next_pending_link(&database, &handle);
+            tauri::async_runtime::spawn(async move {
+                commands::share_links::recover_stale_parsing_links(&db);
+                commands::share_links::start_next_pending_link(&db, &handle);
+            });
 
             app.manage(database);
             Ok(())
