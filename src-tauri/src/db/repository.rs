@@ -430,13 +430,16 @@ impl Database {
         let page_size = page_size.min(200);
         let offset = ((page - 1) * page_size) as i64;
 
+        // Normalize: empty string means root directory ("0")
+        let effective_parent_id = if parent_id.is_empty() { "0" } else { parent_id };
+
         let mut where_clauses = vec![
             "f.share_link_id = ?1".to_string(),
             "f.parent_id = ?2".to_string(),
         ];
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         param_values.push(Box::new(share_link_id));
-        param_values.push(Box::new(parent_id.to_string()));
+        param_values.push(Box::new(effective_parent_id.to_string()));
         let mut idx = 3;
 
         if let Some(ft) = file_type {
