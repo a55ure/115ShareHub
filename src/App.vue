@@ -7,6 +7,7 @@ import {
   FilmOutline,
   LinkOutline,
   SearchOutline,
+  DocumentTextOutline,
   PersonCircleOutline,
   SettingsOutline,
 } from '@vicons/ionicons5'
@@ -25,6 +26,7 @@ const menuOptions: MenuOption[] = [
   { label: '资源库', key: 'library', icon: renderIcon(FilmOutline) },
   { label: '分享链接', key: 'links', icon: renderIcon(LinkOutline) },
   { label: '搜索', key: 'search', icon: renderIcon(SearchOutline) },
+  { label: '解析日志', key: 'logs', icon: renderIcon(DocumentTextOutline) },
   { label: '账号管理', key: 'account', icon: renderIcon(PersonCircleOutline) },
   { label: '设置', key: 'settings', icon: renderIcon(SettingsOutline) },
 ]

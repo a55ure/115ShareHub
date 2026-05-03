@@ -83,11 +83,17 @@ impl ShareLinkParser {
         let mut total_dirs: u64 = 0;
         let mut total_size: i64 = 0;
 
+        self.emit_log(share_link_id, "info", &format!("开始解析，根目录共 {} 项", data.count), app_handle);
+
         let root_items = self.fetch_all_pages(share_code, receive_code, "0", Some(&warn_cb)).await?;
         for item in &root_items {
             if item.is_file != 0 { total_files += 1; total_size += item.size; }
             else { total_dirs += 1; }
         }
+
+        self.emit_log(share_link_id, "scan", &format!("/ — {} 文件, {} 目录", 
+            root_items.iter().filter(|i| i.is_file != 0).count(),
+            root_items.iter().filter(|i| i.is_file == 0).count()), app_handle);
 
         let root_parsed = items_to_parsed(&root_items, "", 0);
         self.flush_to_db(db, share_link_id, &root_parsed);
@@ -100,18 +106,26 @@ impl ShareLinkParser {
             .collect();
 
         while let Some(task) = stack.pop() {
+            self.emit_log(share_link_id, "scan", &format!("扫描目录: {}", task.path_prefix), app_handle);
+
             let items = match self.fetch_all_pages(share_code, receive_code, &task.cid, Some(&warn_cb)).await {
                 Ok(items) => items,
                 Err(e) => {
+                    self.emit_log(share_link_id, "error", &format!("目录 {} 获取失败: {}", task.path_prefix, e), app_handle);
                     log::warn!("Failed to fetch dir {}: {}, skipping", task.path_prefix, e);
                     continue;
                 }
             };
 
+            let dir_count = items.iter().filter(|i| i.is_file == 0).count();
+            let file_count = items.iter().filter(|i| i.is_file != 0).count();
+
             for item in &items {
                 if item.is_file != 0 { total_files += 1; total_size += item.size; }
                 else { total_dirs += 1; }
             }
+
+            self.emit_log(share_link_id, "scan", &format!("{} — {} 文件, {} 子目录", task.path_prefix, file_count, dir_count), app_handle);
 
             let parsed = items_to_parsed(&items, &task.path_prefix, task.depth);
             self.flush_to_db(db, share_link_id, &parsed);
@@ -125,6 +139,8 @@ impl ShareLinkParser {
                 });
             }
         }
+
+        self.emit_log(share_link_id, "info", &format!("解析完成: {} 文件, {} 目录, {}", total_files, total_dirs, format_size(total_size)), app_handle);
 
         Ok(ParseResult { share_info, user_info, total_files, total_dirs, total_size })
     }
@@ -145,6 +161,15 @@ impl ShareLinkParser {
     fn emit_progress(&self, share_link_id: i64, path: &str, files: u64, dirs: u64, app_handle: &tauri::AppHandle) {
         let progress = ParseProgress { share_link_id, current_path: path.to_string(), files_found: files, dirs_found: dirs };
         let _ = app_handle.emit("share-link-progress", &progress);
+    }
+
+    fn emit_log(&self, share_link_id: i64, level: &str, message: &str, app_handle: &tauri::AppHandle) {
+        let _ = app_handle.emit("share-link-log", serde_json::json!({
+            "share_link_id": share_link_id,
+            "level": level,
+            "message": message,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        }));
     }
 
     async fn fetch_all_pages(
@@ -219,4 +244,14 @@ fn extension_based_type(filename: &str) -> String {
         else if subtitle_exts.contains(&ext) { "subtitle" }
         else { "other" };
     t.to_string()
+}
+
+fn format_size(bytes: i64) -> String {
+    if bytes < 1024 { return format!("{} B", bytes); }
+    let kb = bytes as f64 / 1024.0;
+    if kb < 1024.0 { return format!("{:.1} KB", kb); }
+    let mb = kb / 1024.0;
+    if mb < 1024.0 { return format!("{:.1} MB", mb); }
+    let gb = mb / 1024.0;
+    format!("{:.2} GB", gb)
 }
