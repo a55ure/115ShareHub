@@ -108,6 +108,24 @@ export async function receiveShareFile(fileId: string, shareLinkId: number, cid:
   return invoke<string>('receive_share_file', { request: { file_id: fileId, share_link_id: shareLinkId, cid } })
 }
 
+export async function receiveShareFolder(folderId: string, shareLinkId: number): Promise<string> {
+  return invoke<string>('receive_share_folder', { request: { folder_id: folderId, share_link_id: shareLinkId } })
+}
+
+// Browse share directory
+export interface BrowseDirParams {
+  share_link_id: number
+  parent_id: string
+  file_type?: string
+  keyword?: string
+  page?: number
+  page_size?: number
+}
+
+export async function browseShareDir(params: BrowseDirParams): Promise<PaginatedResult<FileEntry>> {
+  return invoke<PaginatedResult<FileEntry>>('browse_share_dir', { params })
+}
+
 // User folders
 export interface UserFolder {
   cid: string

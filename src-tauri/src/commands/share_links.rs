@@ -1,6 +1,6 @@
 use crate::db::models::*;
 use crate::db::Database;
-use crate::pan115::client::{Pan115Client, ProxyConfig};
+use crate::pan115::client::Pan115Client;
 use crate::pan115::parser::ShareLinkParser;
 use tauri::{AppHandle, Emitter, State};
 use url::Url;
@@ -379,4 +379,66 @@ pub async fn receive_share_file(
         .flatten()
         .unwrap_or_else(|| "根目录".to_string());
     Ok(format!("已保存到: {}", target_name))
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReceiveFolderRequest {
+    pub folder_id: String,
+    pub share_link_id: i64,
+}
+
+#[tauri::command]
+pub async fn receive_share_folder(
+    state: State<'_, Database>,
+    request: ReceiveFolderRequest,
+) -> Result<String, String> {
+    let share_link = state
+        .get_share_link(request.share_link_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("分享链接不存在".to_string())?;
+
+    let cookie = state
+        .get_setting("auth_cookie")
+        .map_err(|e| e.to_string())?
+        .ok_or("请先登录115账号".to_string())?;
+
+    if cookie.is_empty() {
+        return Err("请先登录115账号".to_string());
+    }
+
+    let target_cid = state
+        .get_setting("receive_target_cid")
+        .map_err(|e| e.to_string())?
+        .filter(|v| !v.is_empty() && v != "0")
+        .unwrap_or_else(|| "0".to_string());
+
+    // Get all file IDs recursively under this folder
+    let file_ids = state
+        .get_all_file_ids_in_dir(request.share_link_id, &request.folder_id)
+        .map_err(|e| e.to_string())?;
+
+    if file_ids.is_empty() {
+        return Err("文件夹为空，没有可转存的文件".to_string());
+    }
+
+    let proxy_configs = get_proxy_configs_from_db(&state);
+    let client = Pan115Client::with_proxy_pool(1, &proxy_configs).with_cookie(Some(cookie));
+
+    // Batch receive — send all file IDs in one request
+    client
+        .receive_share_batch(
+            &share_link.share_code,
+            &share_link.receive_code,
+            &file_ids,
+            &target_cid,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let target_name = state
+        .get_setting("receive_target_name")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "根目录".to_string());
+    Ok(format!("已转存 {} 个文件到: {}", file_ids.len(), target_name))
 }

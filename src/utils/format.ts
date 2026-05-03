@@ -24,6 +24,7 @@ export const FILE_TYPE_OPTIONS = [
   { label: '压缩包', value: 'archive' },
   { label: '软件', value: 'software' },
   { label: '电子书', value: 'book' },
+  { label: '文件夹', value: 'folder' },
   { label: '其他', value: 'other' },
 ] as const
 
@@ -35,5 +36,6 @@ export const FILE_TYPE_COLOR: Record<string, string> = {
   archive: '#9b59b6',
   software: '#1abc9c',
   book: '#e67e22',
+  folder: '#18a058',
   other: '#95a5a6',
 }

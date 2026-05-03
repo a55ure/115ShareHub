@@ -31,6 +31,7 @@ const typeOptions = [
   { label: '图片', value: 'image' },
   { label: '文档', value: 'document' },
   { label: '压缩包', value: 'archive' },
+  { label: '文件夹', value: 'folder' },
   { label: '其他', value: 'other' },
 ]
 

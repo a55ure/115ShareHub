@@ -35,6 +35,9 @@ onMounted(async () => {
     store.fetchLinks(store.currentPage)
     message.success(`分享链接解析完成，共 ${event.payload.total_files} 个文件`)
   })
+  const unlistenWarn = await listen('share-link-warn', (event: any) => {
+    message.warning(event.payload.message, { duration: 8000 })
+  })
   const unlistenError = await listen('share-link-error', (event: any) => {
     store.updateLinkStatus(event.payload.share_link_id, 'error')
     store.fetchLinks(store.currentPage)
@@ -44,6 +47,7 @@ onMounted(async () => {
   onUnmounted(() => {
     unlistenProgress()
     unlistenCompleted()
+    unlistenWarn()
     unlistenError()
   })
 })

@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { NLayout, NLayoutSider, NMenu, NIcon, NLayoutContent, NConfigProvider, NMessageProvider, zhCN } from 'naive-ui'
 import {
   HomeOutline,
+  FilmOutline,
   LinkOutline,
   SearchOutline,
   PersonCircleOutline,
@@ -21,6 +22,7 @@ function renderIcon(icon: any) {
 
 const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: 'dashboard', icon: renderIcon(HomeOutline) },
+  { label: '资源库', key: 'library', icon: renderIcon(FilmOutline) },
   { label: '分享链接', key: 'links', icon: renderIcon(LinkOutline) },
   { label: '搜索', key: 'search', icon: renderIcon(SearchOutline) },
   { label: '账号管理', key: 'account', icon: renderIcon(PersonCircleOutline) },

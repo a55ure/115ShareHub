@@ -414,6 +414,117 @@ impl Database {
         Ok((items, total))
     }
 
+    /// List files/dirs inside a specific directory of a share link.
+    /// parent_id = "" or "0" means root of the share.
+    pub fn list_files_in_dir(
+        &self,
+        share_link_id: i64,
+        parent_id: &str,
+        file_type: Option<&str>,
+        keyword: Option<&str>,
+        page: u32,
+        page_size: u32,
+    ) -> Result<(Vec<FileEntry>, i64), rusqlite::Error> {
+        let conn = self.get_conn();
+        let page = page.max(1);
+        let page_size = page_size.min(200);
+        let offset = ((page - 1) * page_size) as i64;
+
+        let mut where_clauses = vec![
+            "f.share_link_id = ?1".to_string(),
+            "f.parent_id = ?2".to_string(),
+        ];
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        param_values.push(Box::new(share_link_id));
+        param_values.push(Box::new(parent_id.to_string()));
+        let mut idx = 3;
+
+        if let Some(ft) = file_type {
+            where_clauses.push(format!("f.file_type = ?{}", idx));
+            param_values.push(Box::new(ft.to_string()));
+            idx += 1;
+        }
+
+        if let Some(kw) = keyword {
+            if !kw.is_empty() {
+                where_clauses.push(format!("f.name LIKE ?{}", idx));
+                param_values.push(Box::new(format!("%{}%", kw)));
+                idx += 1;
+            }
+        }
+
+        let where_str = where_clauses.join(" AND ");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+
+        let count_sql = format!("SELECT COUNT(*) FROM files f WHERE {}", where_str);
+        let total: i64 = conn.query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))?;
+
+        let limit_i64 = page_size as i64;
+        param_values.push(Box::new(limit_i64));
+        param_values.push(Box::new(offset));
+
+        // Dirs first, then files, sorted by name
+        let query_sql = format!(
+            "SELECT f.id, f.share_link_id, f.file_id, f.parent_id, f.name, f.size, f.sha1, \
+             f.is_dir, f.file_type, f.full_path, f.depth, f.thumbnail_url \
+             FROM files f WHERE {} ORDER BY f.is_dir DESC, f.name ASC LIMIT ?{} OFFSET ?{}",
+            where_str, idx, idx + 1
+        );
+
+        let all_params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&query_sql)?;
+        let items = stmt
+            .query_map(all_params.as_slice(), |row| {
+                Ok(FileEntry {
+                    id: row.get(0)?,
+                    share_link_id: row.get(1)?,
+                    file_id: row.get(2)?,
+                    parent_id: row.get(3)?,
+                    name: row.get(4)?,
+                    size: row.get(5)?,
+                    sha1: row.get(6)?,
+                    is_dir: row.get::<_, i32>(7)? != 0,
+                    file_type: row.get(8)?,
+                    full_path: row.get(9)?,
+                    depth: row.get(10)?,
+                    thumbnail_url: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok((items, total))
+    }
+
+    /// Recursively get all non-dir file_ids under a given parent_id for a share link.
+    pub fn get_all_file_ids_in_dir(
+        &self,
+        share_link_id: i64,
+        parent_id: &str,
+    ) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.get_conn();
+        let mut all_ids: Vec<String> = Vec::new();
+        let mut stack: Vec<String> = vec![parent_id.to_string()];
+
+        while let Some(pid) = stack.pop() {
+            let mut stmt = conn.prepare(
+                "SELECT file_id, is_dir FROM files WHERE share_link_id = ?1 AND parent_id = ?2",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![share_link_id, pid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+            })?;
+            for row in rows {
+                let (fid, is_dir) = row?;
+                if is_dir != 0 {
+                    stack.push(fid);
+                } else {
+                    all_ids.push(fid);
+                }
+            }
+        }
+
+        Ok(all_ids)
+    }
+
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
         let conn = self.get_conn();
         let result = conn.query_row(

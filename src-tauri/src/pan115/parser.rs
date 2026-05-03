@@ -59,8 +59,18 @@ impl ShareLinkParser {
         app_handle: &tauri::AppHandle,
         db: &Database,
     ) -> Result<ParseResult, ApiError> {
+        let warn_cb = |attempt: u32, max_retries: u32, wait_secs: u64| {
+            let _ = app_handle.emit("share-link-warn", serde_json::json!({
+                "share_link_id": share_link_id,
+                "message": format!("被115服务器拦截，等待{}秒后重试 ({}/{})", wait_secs, attempt, max_retries),
+                "attempt": attempt,
+                "max_retries": max_retries,
+                "wait_secs": wait_secs,
+            }));
+        };
+
         let first = self.client
-            .fetch_share_snap_with_backoff(share_code, receive_code, "0", self.page_size, 0, 3)
+            .fetch_share_snap_with_backoff(share_code, receive_code, "0", self.page_size, 0, 3, Some(&warn_cb))
             .await?;
 
         let data = first.data.ok_or_else(|| {
@@ -73,7 +83,7 @@ impl ShareLinkParser {
         let mut total_dirs: u64 = 0;
         let mut total_size: i64 = 0;
 
-        let root_items = self.fetch_all_pages(share_code, receive_code, "0").await?;
+        let root_items = self.fetch_all_pages(share_code, receive_code, "0", Some(&warn_cb)).await?;
         for item in &root_items {
             if item.is_file != 0 { total_files += 1; total_size += item.size; }
             else { total_dirs += 1; }
@@ -90,7 +100,7 @@ impl ShareLinkParser {
             .collect();
 
         while let Some(task) = stack.pop() {
-            let items = match self.fetch_all_pages(share_code, receive_code, &task.cid).await {
+            let items = match self.fetch_all_pages(share_code, receive_code, &task.cid, Some(&warn_cb)).await {
                 Ok(items) => items,
                 Err(e) => {
                     log::warn!("Failed to fetch dir {}: {}, skipping", task.path_prefix, e);
@@ -137,11 +147,17 @@ impl ShareLinkParser {
         let _ = app_handle.emit("share-link-progress", &progress);
     }
 
-    async fn fetch_all_pages(&self, share_code: &str, receive_code: &str, cid: &str) -> Result<Vec<ShareSnapItem>, ApiError> {
+    async fn fetch_all_pages(
+        &self,
+        share_code: &str,
+        receive_code: &str,
+        cid: &str,
+        on_block: Option<&(dyn Fn(u32, u32, u64) + Sync)>,
+    ) -> Result<Vec<ShareSnapItem>, ApiError> {
         let mut all_items = Vec::new();
         let mut offset: u32 = 0;
         loop {
-            let resp = self.client.fetch_share_snap_with_backoff(share_code, receive_code, cid, self.page_size, offset, 3).await?;
+            let resp = self.client.fetch_share_snap_with_backoff(share_code, receive_code, cid, self.page_size, offset, 3, on_block).await?;
             let data = match resp.data { Some(d) => d, None => break };
             let count = data.list.len() as u32;
             all_items.extend(data.list);
