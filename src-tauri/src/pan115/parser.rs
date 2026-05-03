@@ -204,7 +204,7 @@ fn items_to_parsed(items: &[ShareSnapItem], path_prefix: &str, depth: i32) -> Ve
             size: item.size,
             sha1: item.sha1.clone(),
             is_dir,
-            file_type: derive_file_type(&item.ico, &item.name),
+            file_type: if is_dir { "folder".to_string() } else { derive_file_type(&item.ico, &item.name) },
             full_path,
             depth,
             thumbnail_url: item.thumb_url.clone().unwrap_or_default(),
