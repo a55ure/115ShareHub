@@ -24,6 +24,25 @@ const editingId = ref(0)
 const editTitle = ref('')
 const editReceiveCode = ref('')
 
+function extractPasswordFromUrl(url: string): string {
+  try {
+    const u = new URL(url.trim())
+    const password = u.searchParams.get('password') || u.searchParams.get('receive_code') || u.searchParams.get('code')
+    return password || ''
+  } catch {
+    const match = url.match(/[?&](?:password|receive_code|code)=([^&#]*)/i)
+    return match ? decodeURIComponent(match[1]) : ''
+  }
+}
+
+function onUrlInput(val: string) {
+  shareUrl.value = val
+  if (!receiveCode.value && val.includes('?')) {
+    const code = extractPasswordFromUrl(val)
+    if (code) receiveCode.value = code
+  }
+}
+
 interface ParseProgress {
   share_link_id: number
   title: string
@@ -221,7 +240,7 @@ const columns: DataTableColumns<ShareLink> = [
       </NAlert>
       <NForm>
         <NFormItem label="分享链接">
-          <NInput v-model:value="shareUrl" placeholder="https://115cdn.com/s/xxxxx 或分享码" />
+          <NInput :value="shareUrl" @update:value="onUrlInput" placeholder="https://115cdn.com/s/xxxxx 或分享码" />
         </NFormItem>
         <NFormItem label="提取码">
           <NInput v-model:value="receiveCode" placeholder="选填" />

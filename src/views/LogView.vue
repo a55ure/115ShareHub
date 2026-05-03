@@ -17,6 +17,8 @@ let logId = 0
 const logContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
 
+const unlisteners: (() => void)[] = []
+
 onMounted(async () => {
   const unlistenLog = await listen('share-link-log', (event: any) => {
     const p = event.payload
@@ -27,7 +29,6 @@ onMounted(async () => {
       message: p.message,
       share_link_id: p.share_link_id,
     })
-    // Trim to max
     if (logs.value.length > maxLogs) {
       logs.value = logs.value.slice(-maxLogs)
     }
@@ -84,13 +85,12 @@ onMounted(async () => {
     })
   })
 
-  onUnmounted(() => {
-    unlistenLog()
-    unlistenProgress()
-    unlistenWarn()
-    unlistenCompleted()
-    unlistenError()
-  })
+  unlisteners.push(unlistenLog, unlistenProgress, unlistenWarn, unlistenCompleted, unlistenError)
+})
+
+onUnmounted(() => {
+  unlisteners.forEach(fn => fn())
+  unlisteners.length = 0
 })
 
 function clearLogs() {

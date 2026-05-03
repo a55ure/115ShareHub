@@ -52,26 +52,40 @@ fn get_auth_cookie_from_db(db: &Database) -> Option<String> {
         .and_then(|c| if c.is_empty() { None } else { Some(c) })
 }
 
-fn extract_share_code(input: &str) -> Option<String> {
+fn extract_share_info(input: &str) -> Option<(String, String)> {
     if input.starts_with("http") {
         if let Ok(parsed) = Url::parse(input) {
             let path = parsed.path();
             if let Some(code) = path.strip_prefix("/s/") {
-                return Some(code.trim_end_matches('/').to_string());
+                let share_code = code.trim_end_matches('/').to_string();
+                let receive_code = parsed
+                    .query_pairs()
+                    .find(|(k, _)| k == "password" || k == "receive_code" || k == "code")
+                    .map(|(_, v)| v.to_string())
+                    .unwrap_or_default();
+                return Some((share_code, receive_code));
             }
         }
-        if let Some(code) = input.strip_prefix("https://115cdn.com/s/") {
-            return Some(
-                code.trim_end_matches('/')
-                    .split('?')
-                    .next()
-                    .unwrap_or(code)
-                    .to_string(),
-            );
+        if let Some(rest) = input.strip_prefix("https://115cdn.com/s/") {
+            let share_code = rest
+                .trim_end_matches('/')
+                .split('?')
+                .next()
+                .unwrap_or(rest)
+                .to_string();
+            let receive_code = if let Some(qs) = rest.split('?').nth(1) {
+                url::form_urlencoded::parse(qs.as_bytes())
+                    .find(|(k, _)| k == "password" || k == "receive_code" || k == "code")
+                    .map(|(_, v)| v.to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            return Some((share_code, receive_code));
         }
     }
     if !input.contains('/') && !input.contains('.') && !input.is_empty() {
-        Some(input.to_string())
+        Some((input.to_string(), String::new()))
     } else {
         None
     }
@@ -212,24 +226,33 @@ pub async fn add_share_link(
     app: AppHandle,
     request: AddShareLinkRequest,
 ) -> Result<ShareLink, String> {
-    let share_code = extract_share_code(&request.url)
+    let (share_code, auto_receive_code) = extract_share_info(&request.url)
         .ok_or_else(|| format!("Invalid share link URL: {}", request.url))?;
 
-    // Dedup: check if this share_code + receive_code already exists
-    let conn = state.get_conn();
-    let existing: Option<i64> = conn.query_row(
-        "SELECT id FROM share_links WHERE share_code = ?1 AND receive_code = ?2",
-        rusqlite::params![share_code, request.receive_code],
-        |row| row.get(0),
-    ).ok();
+    let receive_code = if request.receive_code.is_empty() {
+        auto_receive_code
+    } else {
+        request.receive_code
+    };
 
-    if let Some(id) = existing {
-        let link = state.get_share_link(id).map_err(|e| e.to_string())?.ok_or("链接不存在")?;
-        return Err(format!("该分享链接已存在（状态: {}）", link.status));
+    // Dedup: check if this share_code + receive_code already exists
+    {
+        let conn = state.get_conn();
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM share_links WHERE share_code = ?1 AND receive_code = ?2",
+            rusqlite::params![share_code, receive_code],
+            |row| row.get(0),
+        ).ok();
+
+        if let Some(id) = existing {
+            drop(conn);
+            let link = state.get_share_link(id).map_err(|e| e.to_string())?.ok_or("链接不存在")?;
+            return Err(format!("该分享链接已存在（状态: {}）", link.status));
+        }
     }
 
     let id = state
-        .insert_share_link(&share_code, &request.receive_code)
+        .insert_share_link(&share_code, &receive_code)
         .map_err(|e| e.to_string())?;
 
     let share_link = state
