@@ -448,24 +448,16 @@ pub async fn receive_share_folder(
         .filter(|v| !v.is_empty() && v != "0")
         .unwrap_or_else(|| "0".to_string());
 
-    // Get all file IDs recursively under this folder
-    let file_ids = state
-        .get_all_file_ids_in_dir(request.share_link_id, &request.folder_id)
-        .map_err(|e| e.to_string())?;
-
-    if file_ids.is_empty() {
-        return Err("文件夹为空，没有可转存的文件".to_string());
-    }
-
     let proxy_configs = get_proxy_configs_from_db(&state);
     let client = Pan115Client::with_proxy_pool(1, &proxy_configs).with_cookie(Some(cookie));
 
-    // Batch receive — send all file IDs in one request
+    // Directly pass the folder's category_id to 115 API — it handles the whole tree
     client
-        .receive_share_batch(
+        .receive_share_file(
             &share_link.share_code,
             &share_link.receive_code,
-            &file_ids,
+            &request.folder_id,
+            "",
             &target_cid,
         )
         .await
@@ -476,5 +468,5 @@ pub async fn receive_share_folder(
         .ok()
         .flatten()
         .unwrap_or_else(|| "根目录".to_string());
-    Ok(format!("已转存 {} 个文件到: {}", file_ids.len(), target_name))
+    Ok(format!("已转存文件夹到: {}", target_name))
 }
