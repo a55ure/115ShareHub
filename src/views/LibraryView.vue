@@ -6,7 +6,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useShareLinksStore } from '../stores/shareLinks'
-import { formatFileSize, FILE_TYPE_COLOR } from '../utils/format'
+import { formatFileSize, FILE_TYPE_COLOR, FILE_TYPE_LABEL } from '../utils/format'
 import { browseShareDir, receiveShareFile, receiveShareFolder, getLoginStatus } from '../utils/tauri'
 import type { FileEntry, PaginatedResult, ShareLink } from '../types'
 
@@ -35,6 +35,8 @@ const typeOptions = [
   { label: '图片', value: 'image' },
   { label: '文档', value: 'document' },
   { label: '压缩包', value: 'archive' },
+  { label: 'ISO原盘', value: 'iso' },
+  { label: '字幕', value: 'subtitle' },
   { label: '文件夹', value: 'folder' },
   { label: '其他', value: 'other' },
 ]
@@ -170,7 +172,7 @@ const fileColumns: DataTableColumns<FileEntry> = [
       return h(NTag, {
         size: 'small', round: true,
         color: { color: FILE_TYPE_COLOR[type] || '#95a5a6', textColor: '#fff' },
-      }, { default: () => type })
+      }, { default: () => FILE_TYPE_LABEL[type] || type })
     },
   },
 ]

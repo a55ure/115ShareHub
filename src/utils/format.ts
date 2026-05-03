@@ -24,6 +24,8 @@ export const FILE_TYPE_OPTIONS = [
   { label: '压缩包', value: 'archive' },
   { label: '软件', value: 'software' },
   { label: '电子书', value: 'book' },
+  { label: 'ISO原盘', value: 'iso' },
+  { label: '字幕', value: 'subtitle' },
   { label: '文件夹', value: 'folder' },
   { label: '其他', value: 'other' },
 ] as const
@@ -36,6 +38,22 @@ export const FILE_TYPE_COLOR: Record<string, string> = {
   archive: '#9b59b6',
   software: '#1abc9c',
   book: '#e67e22',
+  iso: '#c0392b',
+  subtitle: '#7f8c8d',
   folder: '#18a058',
   other: '#95a5a6',
+}
+
+export const FILE_TYPE_LABEL: Record<string, string> = {
+  video: '视频',
+  audio: '音频',
+  image: '图片',
+  document: '文档',
+  archive: '压缩包',
+  software: '软件',
+  book: '电子书',
+  iso: 'ISO原盘',
+  subtitle: '字幕',
+  folder: '文件夹',
+  other: '其他',
 }

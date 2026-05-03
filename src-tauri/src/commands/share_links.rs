@@ -215,6 +215,19 @@ pub async fn add_share_link(
     let share_code = extract_share_code(&request.url)
         .ok_or_else(|| format!("Invalid share link URL: {}", request.url))?;
 
+    // Dedup: check if this share_code + receive_code already exists
+    let conn = state.get_conn();
+    let existing: Option<i64> = conn.query_row(
+        "SELECT id FROM share_links WHERE share_code = ?1 AND receive_code = ?2",
+        rusqlite::params![share_code, request.receive_code],
+        |row| row.get(0),
+    ).ok();
+
+    if let Some(id) = existing {
+        let link = state.get_share_link(id).map_err(|e| e.to_string())?.ok_or("链接不存在")?;
+        return Err(format!("该分享链接已存在（状态: {}）", link.status));
+    }
+
     let id = state
         .insert_share_link(&share_code, &request.receive_code)
         .map_err(|e| e.to_string())?;

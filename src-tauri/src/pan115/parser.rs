@@ -202,9 +202,11 @@ fn extension_based_type(filename: &str) -> String {
     let audio_exts = ["mp3", "flac", "wav", "aac", "ogg", "wma", "m4a", "ape", "alac", "opus"];
     let image_exts = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "ico", "tiff", "tif"];
     let doc_exts = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf", "odt", "ods"];
-    let archive_exts = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "zst", "iso"];
+    let archive_exts = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "zst"];
     let software_exts = ["exe", "msi", "dmg", "pkg", "deb", "rpm", "apk", "app"];
     let book_exts = ["epub", "mobi", "azw3", "fb2", "lit"];
+    let iso_exts = ["iso", "img", "mdf", "nrg"];
+    let subtitle_exts = ["srt", "ass", "ssa", "sub", "idx", "sup", "vtt", "lrc"];
 
     let t = if video_exts.contains(&ext) { "video" }
         else if audio_exts.contains(&ext) { "audio" }
@@ -213,6 +215,8 @@ fn extension_based_type(filename: &str) -> String {
         else if archive_exts.contains(&ext) { "archive" }
         else if software_exts.contains(&ext) { "software" }
         else if book_exts.contains(&ext) { "book" }
+        else if iso_exts.contains(&ext) { "iso" }
+        else if subtitle_exts.contains(&ext) { "subtitle" }
         else { "other" };
     t.to_string()
 }

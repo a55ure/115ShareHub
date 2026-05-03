@@ -8,7 +8,7 @@ import type { DataTableColumns } from 'naive-ui'
 import { useSearchStore } from '../stores/search'
 import { useShareLinksStore } from '../stores/shareLinks'
 import { receiveShareFile, getLoginStatus } from '../utils/tauri'
-import { formatFileSize, FILE_TYPE_OPTIONS, FILE_TYPE_COLOR } from '../utils/format'
+import { formatFileSize, FILE_TYPE_OPTIONS, FILE_TYPE_COLOR, FILE_TYPE_LABEL } from '../utils/format'
 import type { FileEntry } from '../types'
 
 const searchStore = useSearchStore()
@@ -121,7 +121,7 @@ const columns: DataTableColumns<FileEntry> = [
     render: (row) => h(NTag, {
       size: 'small', round: true,
       color: { color: FILE_TYPE_COLOR[row.file_type] || '#95a5a6', textColor: '#fff' },
-    }, { default: () => row.file_type }),
+    }, { default: () => FILE_TYPE_LABEL[row.file_type] || row.file_type }),
   },
   {
     title: 'SHA1', key: 'sha1', width: 160, ellipsis: { tooltip: true },

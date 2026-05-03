@@ -2,7 +2,7 @@
 import { ref, h, onMounted, onUnmounted } from 'vue'
 import {
   NButton, NDataTable, NSpace, NTag, NModal, NForm, NFormItem, NInput,
-  NPopconfirm, useMessage, NSpin, NAlert,
+  NPopconfirm, useMessage, NSpin, NAlert, NCard, NProgress,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useShareLinksStore } from '../stores/shareLinks'
@@ -24,24 +24,58 @@ const editingId = ref(0)
 const editTitle = ref('')
 const editReceiveCode = ref('')
 
+interface ParseProgress {
+  share_link_id: number
+  title: string
+  current_path: string
+  files_found: number
+  dirs_found: number
+  warn_message: string
+}
+
+const parseProgress = ref<ParseProgress | null>(null)
+
 onMounted(async () => {
   await store.fetchLinks(1)
 
   const unlistenProgress = await listen('share-link-progress', (event: any) => {
-    store.updateLinkStatus(event.payload.share_link_id, 'parsing')
+    const p = event.payload
+    store.updateLinkStatus(p.share_link_id, 'parsing')
+    // Find the link title
+    const link = store.links.find(l => l.id === p.share_link_id)
+    parseProgress.value = {
+      share_link_id: p.share_link_id,
+      title: link?.title || link?.share_code || `Link #${p.share_link_id}`,
+      current_path: p.current_path,
+      files_found: p.files_found,
+      dirs_found: p.dirs_found,
+      warn_message: '',
+    }
   })
+
   const unlistenCompleted = await listen('share-link-completed', (event: any) => {
     store.updateLinkStatus(event.payload.share_link_id, 'completed')
     store.fetchLinks(store.currentPage)
-    message.success(`分享链接解析完成，共 ${event.payload.total_files} 个文件`)
+    message.success(`解析完成，共 ${event.payload.total_files} 个文件`)
+    if (parseProgress.value?.share_link_id === event.payload.share_link_id) {
+      parseProgress.value = null
+    }
   })
+
   const unlistenWarn = await listen('share-link-warn', (event: any) => {
+    if (parseProgress.value) {
+      parseProgress.value.warn_message = event.payload.message
+    }
     message.warning(event.payload.message, { duration: 8000 })
   })
+
   const unlistenError = await listen('share-link-error', (event: any) => {
     store.updateLinkStatus(event.payload.share_link_id, 'error')
     store.fetchLinks(store.currentPage)
     message.error(`解析失败: ${event.payload.error}`)
+    if (parseProgress.value?.share_link_id === event.payload.share_link_id) {
+      parseProgress.value = null
+    }
   })
 
   onUnmounted(() => {
@@ -148,6 +182,29 @@ const columns: DataTableColumns<ShareLink> = [
       <NButton type="primary" @click="showModal = true">添加链接</NButton>
     </div>
 
+    <!-- Parse Progress Panel -->
+    <NCard v-if="parseProgress" title="解析进度" size="small" style="margin-bottom: 16px;"
+      :bordered="true">
+      <template #header-extra>
+        <NTag type="info" size="small">解析中</NTag>
+      </template>
+      <Space vertical :size="8" style="width: 100%;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-weight: 600;">{{ parseProgress.title }}</span>
+          <span style="color: #999; font-size: 13px;">
+            {{ parseProgress.files_found }} 个文件 / {{ parseProgress.dirs_found }} 个目录
+          </span>
+        </div>
+        <div style="color: #666; font-size: 13px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          当前: {{ parseProgress.current_path || '/' }}
+        </div>
+        <NProgress type="line" :show-indicator="false" status="info" :height="6" />
+        <div v-if="parseProgress.warn_message" style="color: #f0a020; font-size: 12px;">
+          {{ parseProgress.warn_message }}
+        </div>
+      </Space>
+    </NCard>
+
     <NSpin :show="store.loading">
       <NDataTable
         :columns="columns"
@@ -160,7 +217,7 @@ const columns: DataTableColumns<ShareLink> = [
     <NModal v-model:show="showModal" preset="dialog" title="添加115分享链接" positive-text="添加" negative-text="取消"
       :loading="submitting" @positive-click="handleAdd">
       <NAlert type="warning" :bordered="false" style="margin-bottom: 12px;">
-        为避免被115服务器封控，解析请求采用随机间隔（0.5~1.5秒/次）。包含大量文件或子目录的分享链接可能需要较长时间，请耐心等待。
+        解析请求采用1~4秒随机间隔，大型分享可能需要较长时间，请耐心等待。
       </NAlert>
       <NForm>
         <NFormItem label="分享链接">
