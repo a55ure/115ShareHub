@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, h, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { NCard, NButton, NTag, NSpace, NEmpty } from 'naive-ui'
 import { listen } from '@tauri-apps/api/event'
 
@@ -16,6 +16,24 @@ const maxLogs = 500
 let logId = 0
 const logContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
+
+const levelTypeMap: Record<string, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
+  info: 'info',
+  scan: 'default',
+  progress: 'info',
+  warn: 'warning',
+  error: 'error',
+  success: 'success',
+}
+
+const levelLabelMap: Record<string, string> = {
+  info: 'INFO',
+  scan: 'SCAN',
+  progress: 'PROGRESS',
+  warn: 'WARN',
+  error: 'ERROR',
+  success: 'DONE',
+}
 
 const unlisteners: (() => void)[] = []
 
@@ -105,19 +123,6 @@ function formatTime(ts: string): string {
     return ts
   }
 }
-
-function levelTag(level: string) {
-  const map: Record<string, { type: 'default' | 'info' | 'success' | 'warning' | 'error', label: string }> = {
-    info: { type: 'info', label: 'INFO' },
-    scan: { type: 'default', label: 'SCAN' },
-    progress: { type: 'info', label: 'PROGRESS' },
-    warn: { type: 'warning', label: 'WARN' },
-    error: { type: 'error', label: 'ERROR' },
-    success: { type: 'success', label: 'DONE' },
-  }
-  const s = map[level] || { type: 'default' as const, label: level }
-  return h(NTag, { type: s.type, size: 'tiny', round: true }, { default: () => s.label })
-}
 </script>
 
 <template>
@@ -148,7 +153,11 @@ function levelTag(level: string) {
             backgroundColor: log.level === 'error' ? '#fff0f0' : log.level === 'warn' ? '#fffbe6' : 'transparent',
           }">
           <span style="color: #999; white-space: nowrap; min-width: 70px;">{{ formatTime(log.timestamp) }}</span>
-          <span style="min-width: 80px;">{{ levelTag(log.level) }}</span>
+          <span style="min-width: 80px;">
+            <NTag :type="levelTypeMap[log.level] || 'default'" size="tiny" round>
+              {{ levelLabelMap[log.level] || log.level }}
+            </NTag>
+          </span>
           <span style="flex: 1; word-break: break-all;">{{ log.message }}</span>
         </div>
       </div>
