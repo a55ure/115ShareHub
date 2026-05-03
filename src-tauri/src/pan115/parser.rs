@@ -51,6 +51,10 @@ impl ShareLinkParser {
         ShareLinkParser { client, page_size }
     }
 
+    fn check_link_exists(db: &Database, share_link_id: i64) -> bool {
+        db.get_share_link(share_link_id).ok().flatten().is_some()
+    }
+
     pub async fn parse_share_link(
         &self,
         share_code: &str,
@@ -96,6 +100,9 @@ impl ShareLinkParser {
             root_items.iter().filter(|i| i.is_file == 0).count()), app_handle);
 
         let root_parsed = items_to_parsed(&root_items, "", 0);
+        if !Self::check_link_exists(db, share_link_id) {
+            return Err(ApiError::Api("分享链接已被删除".to_string()));
+        }
         self.flush_to_db(db, share_link_id, &root_parsed);
         self.emit_progress(share_link_id, "/", total_files, total_dirs, app_handle);
 
@@ -128,6 +135,9 @@ impl ShareLinkParser {
             self.emit_log(share_link_id, "scan", &format!("{} — {} 文件, {} 子目录", task.path_prefix, file_count, dir_count), app_handle);
 
             let parsed = items_to_parsed(&items, &task.path_prefix, task.depth);
+            if !Self::check_link_exists(db, share_link_id) {
+                return Err(ApiError::Api("分享链接已被删除".to_string()));
+            }
             self.flush_to_db(db, share_link_id, &parsed);
             self.emit_progress(share_link_id, &task.path_prefix, total_files, total_dirs, app_handle);
 
